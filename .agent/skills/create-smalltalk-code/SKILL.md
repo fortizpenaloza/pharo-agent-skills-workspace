@@ -1,6 +1,6 @@
 ---
 name: create-smalltalk-code
-description: Guide for creating Pharo Smalltalk classes, methods, and tests using the Fluid syntax.
+description: Guide for creating Pharo Smalltalk (Pharo) classes, methods, and tests using the Fluid syntax.
 ---
 
 # Create Smalltalk Class Skill
