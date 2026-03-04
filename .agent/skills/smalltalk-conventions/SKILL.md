@@ -12,7 +12,7 @@ This skill outlines mandatory conventions and the lessons learned for writing ro
 ### 1. Instance Creation & Validity
 * **Enforce Valid Objects:** Objects must be fully initialized upon creation. Never create an "empty" object and populate it later.
 * **No Public Setters:** This follows the valid object rule. Avoid creating setters; pass all required state during initialization.
-* **Avoid explicit `new`:** Client code should almost never send `new`. Use class-side creation methods that define the "shape" of the object.
+* **Avoid explicit `new` in client code:** Client and domain code should almost never send `new` directly; instead, use class-side creation methods that define the "shape" of the object. Using `self new` *inside* those class-side creation methods (as shown below) is the standard pattern.
 
     ####  ❌ Bad Pattern (Anemic/Mutable)
     *Risk: The object exists in an invalid state (missing currency) and relies on side-effects.*
