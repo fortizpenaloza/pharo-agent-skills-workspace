@@ -81,7 +81,7 @@ This skill outlines mandatory conventions and the lessons learned for writing ro
 * **Variables (Role-Based):** Use `a` or `an` followed by the **role** of the object, not just its type.
     * *Bad:* `aString`, `aNumber`
     * *Good:* `aName`, `anAmountOfLaps`, `aClient`
-* **Collections:** **Never** use `a` or `an`. Always use the prefix `some` followed by the plural noun.
+* **Collections:** **Never** use `a`, `an`, or bare plural names. Always use the prefix `some` followed by the plural noun.
     * *Bad:* `aList`, `anArray`, `accounts`
     * *Good:* `someStocks`, `someNumbers`, `someAccounts`
 * **Block Parameters:** Do not use articles. Use precise nouns.
