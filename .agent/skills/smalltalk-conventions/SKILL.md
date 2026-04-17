@@ -105,7 +105,9 @@ Three similar lines are better than a premature abstraction; add abstractions on
     ```smalltalk
     User class >> email: aString age: anAmountOfYears
         anAmountOfYears < 0 ifTrue: [ Error signal: 'Age cannot be negative' ].
-        ^ self new initializeEmail: aString age: anAmountOfYears
+   User class >> email: anEmail age: anAmountOfYears
+       anAmountOfYears < 0 ifTrue: [ Error signal: 'Age cannot be negative' ].
+       ^ self new initializeEmail: anEmail age: anAmountOfYears
     ```
 
 * **Creation-method selectors must read like a sentence.**

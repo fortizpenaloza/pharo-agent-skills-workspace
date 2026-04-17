@@ -54,7 +54,7 @@ ClassName compile: 'methodSelector: argument
 
 ```smalltalk
 IS2Player compile: 'name
-    ^ name' withInternalLineEndings classified: 'accessing'.
+  ^ name' withInternalLineEndings classified: 'accessing'.
 ```
 
 **Example (Logic):**
@@ -135,8 +135,8 @@ A common convention is to place tests in a sibling package named `PackageName-Te
 
 ```smalltalk
 (TestCase << #FVectorTest
-    slots: {};
-    package: 'FVectorModel-Tests') install.
+  slots: {};
+  package: 'FVectorModel-Tests') install.
 ```
 
 ## 4. Test Implementation
@@ -204,10 +204,12 @@ When dealing with randomness (e.g., dice rolls), create a subclass or a mock obj
 ```smalltalk
 (IS2Die << #IS2LoadedDie
 	slots: { #rollResult };
-	package: 'IS2GameTest') install.
+(IS2Die << #IS2LoadedDie
+  slots: { #rollResult };
+  package: 'IS2GameTest') install.
 
 IS2LoadedDie compile: 'roll
-	^ rollResult' withInternalLineEndings classified: 'action'.
+  ^ rollResult' withInternalLineEndings classified: 'action'.
 ```
 
 **Example (Loaded die using the full creation method pattern):**
@@ -234,7 +236,7 @@ Reminder (from `smalltalk-conventions`): mocks/stubs are permitted **only at str
 
 ## 6. Execution & Verification
 
-Run tests using the MCP tool `mcp__pharo-smalltalk__run_class_test`.
+Run tests using the `run_class_test` command (the canonical MCP tool may be exposed as `mcp__pharo-smalltalk__run_class_test`).
 
 ```json
 {
