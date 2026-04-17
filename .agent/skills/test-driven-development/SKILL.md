@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix in Smalltalk. Strict adherence to Red-Green-Refactor.
+description: Use when implementing any feature or bugfix in Smalltalk. Strict adherence to Red-Green-Refactor, including Beck's canonical five-step cycle and test-list-first discipline.
 ---
 
 # Test-Driven Development (TDD)
@@ -16,12 +16,14 @@ Write the test first. Watch it fail. Write minimal code to pass.
 ## When to Use
 
 **Always:**
+
 - New features
 - Bug fixes
 - Refactoring
 - Behavior changes
 
 **Exceptions (ask your human partner):**
+
 - Throwaway scripts (Workspace/Playground)
 - Generated code
 - FFI definitions
@@ -29,17 +31,51 @@ Write the test first. Watch it fail. Write minimal code to pass.
 Thinking "skip TDD just this once"? Stop. That's rationalization.
 
 ## The Iron Law
+
 *NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST*
 
 Write the method before the test? Delete it. Remove the category. Start over.
 
 **No exceptions:**
+
 - Don't keep it as "reference"
 - Don't "comment it out"
 - Don't look at it
 - Delete means delete
 
 Implement fresh from tests. Period.
+
+## Canon TDD Cycle (Beck's Five Steps)
+
+Beck's canonical cycle has **five** steps, not three. Red-Green-Refactor describes the inner loop; the full cycle wraps it with a scenario list and a repeat step:
+
+1. **Write a test list.** Before coding, enumerate every behavioral scenario you expect to cover: happy path, edge cases, error conditions.
+2. **Write one test.** Pick the simplest item from the list. Write a concrete, runnable test with setup, action, and assertion.
+3. **Make it pass.** Write the simplest code that turns the test green. Commit whatever sins are necessary — the goal is green, not pretty.
+4. **Refactor.** Now that you are green, improve the design. Remove duplication. Improve names. Extract methods. All tests must stay green throughout.
+5. **Repeat.** Cross the item off the list. Add any new scenarios you discovered while coding. Pick the next simplest item.
+
+The critical discipline: **never mix step 3 with step 4.** When you are making it pass, do not refactor. When you are refactoring, do not change behavior.
+
+> "Make it work, make it right, make it fast." — Kent Beck (in that order, always)
+
+### Test List Strategy
+
+- Start with the simplest case that can possibly work.
+- Progress to boundary conditions.
+- End with error conditions.
+- As you code, you *will* discover new scenarios. Add them to the list immediately so they are not forgotten.
+- Do **not** convert all items into tests at once. Write one test, make it pass, refactor, then write the next.
+
+**Example test list — a Stack:**
+
+```smalltalk
+"  - new stack is empty
+   - push one element, top returns it
+   - push two elements, top returns last pushed
+   - pop removes top element
+   - pop on empty stack signals error"
+```
 
 ## Red-Green-Refactor
 
@@ -108,6 +144,12 @@ Vague name, tests mock implementation, not domain logic.
 - Clear selector name (starts with test)
 - Real code (avoid Mocks unless strictly crossing I/O boundaries)
 
+**Scenario names, not method names.** `testTransferReducesSourceBalance` is better than `testTransfer`. Name tests for the stimulus and the expected outcome — tests are documentation; a newcomer should be able to understand the system by reading only the tests.
+
+**Test one *behavior*, not one *method*.** A single method may need several tests for different scenarios. Conversely, one behavior may span multiple methods — let the scenario drive the test, not the method list.
+
+**Assert on observable behavior, not implementation.** Send messages to the object; assert on what comes back. Do not peek at instance variables.
+
 ### Verify RED - Watch It Fail
 
 **MANDATORY. Never skip.**
@@ -170,6 +212,13 @@ After green only:
 - Extract methods (ie shouldRetry:on:)
 - *Important:* Keep test green after every change.
 
+### When to Refactor
+
+- **Only when all tests are green.** If any test is red, your job is to make it green, not to restructure.
+- **Duplication is a hint, not a command** (Beck). Wait until the pattern is clear before abstracting. Three similar lines are better than a premature abstraction.
+- **Focus on code that changes frequently** (Contieri). Stable code with minor imperfections is fine. Refactoring effort should go where it pays off most.
+- **Technical debt compounds** (Contieri). Like financial debt, it is initially convenient but increasingly costly. Address heavily-used modules with growing debt early; leave isolated, low-defect modules alone.
+
 ### Repeat
 
 Next failing test for next feature.
@@ -181,6 +230,9 @@ Next failing test for next feature.
 | **Minimal** | One thing. "and" in name? Split it. | `testValidatesEmailAndDomainAndWhitespace` |
 | **Clear** | Name describes behavior | `testWork` |
 | **Shows intent** | Demonstrates desired API | Obscures what code should do |
+| **Documents** | A newcomer learns the system from the tests | Requires reading the implementation |
+| **Independent** | Each test sets up its own world | Shares fixtures or depends on run order |
+| **Scenario-named** | `testPopOnEmptyStackSignalsError` | `testPop` |
 
 ## Why Order Matters
 
@@ -296,6 +348,38 @@ Run test.
 **REFACTOR**
 Extract validation for multiple fields if needed.
 
+## Example: Invalid-Scenario Guard (Creation Method)
+
+**Behavior:** `Die sided: -5` must be rejected before the object exists.
+
+**Test list addition:** `negative number of sides is rejected with a clear message`.
+
+**RED**
+```smalltalk
+testNegativeFacesAreNotAllowed
+    self
+        should: [ Die sided: -5 ]
+        raise: InstanceCreationFailed
+        withMessageText: 'Number of sides must be strictly positive'.
+```
+
+**Verify RED**
+Run test. Either MNU (selector missing) or assertion failure (no guard clause yet).
+
+**GREEN**
+```smalltalk
+Die class >> sided: anAmountOfSides
+    anAmountOfSides strictlyPositive
+        ifFalse: [ InstanceCreationFailed signal: 'Number of sides must be strictly positive' ].
+    ^ self new initializeSided: anAmountOfSides
+```
+
+**Verify GREEN**
+Run test and the rest of the `DieTest` class — invalid-scenario guard holds, happy path still green.
+
+**REFACTOR**
+If several creation methods share the positivity guard, extract a helper on the receiver (e.g., `anAmountOfSides assertStrictlyPositive`) once the duplication is actually present in two or more creation methods.
+
 ## Verification Checklist
 
 Before marking work complete:
@@ -308,6 +392,8 @@ Before marking work complete:
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
+- [ ] Invalid-scenario guards in creation methods have `should:raise:withMessageText:` tests
+- [ ] Test list tracked throughout — newly-discovered scenarios added, not forgotten
 
 Can't check all boxes? You skipped TDD. Start over.
 
@@ -329,9 +415,13 @@ Never fix bugs without a test.
 ## Testing Anti-Patterns
 
 When adding mocks or test utilities, review the testing anti-patterns below to avoid common pitfalls:
+
 - Testing mock behavior instead of real behavior
 - Adding test-only methods to production classes
 - Mocking without understanding dependencies
+- Coupled tests that depend on execution order or shared state — each test must set up its own world
+- Asserting on instance variables instead of the object's observable protocol
+- Mocking internal domain logic (mocks belong only at strict I/O boundaries — see the Mocking Policy in `smalltalk-conventions`)
 
 ## Final Rule
 
