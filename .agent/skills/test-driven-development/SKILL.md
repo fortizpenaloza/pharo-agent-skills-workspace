@@ -16,12 +16,14 @@ Write the test first. Watch it fail. Write minimal code to pass.
 ## When to Use
 
 **Always:**
+
 - New features
 - Bug fixes
 - Refactoring
 - Behavior changes
 
 **Exceptions (ask your human partner):**
+
 - Throwaway scripts (Workspace/Playground)
 - Generated code
 - FFI definitions
@@ -29,11 +31,13 @@ Write the test first. Watch it fail. Write minimal code to pass.
 Thinking "skip TDD just this once"? Stop. That's rationalization.
 
 ## The Iron Law
+
 *NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST*
 
 Write the method before the test? Delete it. Remove the category. Start over.
 
 **No exceptions:**
+
 - Don't keep it as "reference"
 - Don't "comment it out"
 - Don't look at it
@@ -64,6 +68,7 @@ The critical discipline: **never mix step 3 with step 4.** When you are making i
 - Do **not** convert all items into tests at once. Write one test, make it pass, refactor, then write the next.
 
 **Example test list — a Stack:**
+
 ```smalltalk
 "  - new stack is empty
    - push one element, top returns it
@@ -410,6 +415,7 @@ Never fix bugs without a test.
 ## Testing Anti-Patterns
 
 When adding mocks or test utilities, review the testing anti-patterns below to avoid common pitfalls:
+
 - Testing mock behavior instead of real behavior
 - Adding test-only methods to production classes
 - Mocking without understanding dependencies

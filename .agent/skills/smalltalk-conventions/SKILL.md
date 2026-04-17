@@ -143,7 +143,9 @@ Three similar lines are better than a premature abstraction; add abstractions on
     ```
 
 ### 4. Immutability
+
 Favor immutable objects. Immutable objects:
+
 - Eliminate temporal coupling — order of operations does not matter.
 - Can be shared freely between collaborators without defensive copying.
 - Simplify reasoning about correctness and enable referential transparency.
@@ -201,14 +203,14 @@ Name objects after the roles they play in the domain. A `Ledger` records transac
 
 ## 🏷️ Naming Conventions (English CamelCase)
 
-* **Variables (Role-Based):** Use `a` or `an` followed by the **role** of the object, not just its type.
-    * *Bad:* `aString`, `aNumber`
-    * *Good:* `aName`, `anAmountOfLaps`, `aClient`
-* **Collections:** **Never** use `a`, `an`, or bare plural names. Always use the prefix `some` followed by the plural noun.
-    * *Bad:* `aList`, `anArray`, `accounts`
-    * *Good:* `someStocks`, `someNumbers`, `someAccounts`
-* **Block Parameters:** Do not use articles. Use precise nouns.
-    * *Examples:* `[:item | ... ]`, `[:node | ... ]`
+- **Variables (Role-Based):** Use `a` or `an` followed by the **role** of the object, not just its type.
+  - *Bad:* `aString`, `aNumber`
+  - *Good:* `aName`, `anAmountOfLaps`, `aClient`
+- **Collections:** **Never** use `a`, `an`, or bare plural names. Always use the prefix `some` followed by the plural noun.
+  - *Bad:* `aList`, `anArray`, `accounts`
+  - *Good:* `someStocks`, `someNumbers`, `someAccounts`
+- **Block Parameters:** Do not use articles. Use precise nouns.
+  - *Examples:* `[:item | ... ]`, `[:node | ... ]`
 
 ### Class Names
 
@@ -245,42 +247,24 @@ A class name synthesizes the meaning of all messages its instances understand. R
 
 Describe the role of the value. `highestBid` over `temp` or `b`.
 
-
 ## 🛠️ Syntax, Style & Best Practices
 
-* **Nil Usage:** `nil` is **forbidden** except for lazy initialization logic.
-* **Collections:** Prefer immutable literal Arrays (e.g., `#(1 2 3)`) for static collections unless readability specifically suffers.
-* **Blocks & Cull:** When using `cull:`, remember it allows the block to accept *fewer* arguments than the sender provides. Do not flag this mismatch as an error; it is a feature.
-* **Cascades:** Prefer cascades (`;`) when sending multiple messages to the same receiver.
-* **Forbidden Selectors:** Code must never contain `halt`, `haltOnce`, or `flag:` in production/committed code.
-* **Line Endings:** When compiling strings (e.g., in tools/importers), always use `.withInternalLineEndings` to handle Pharo's CR requirements.
-* **Type Checking:** Avoid `isKindOf:` or `isMemberOf:`. Use polymorphism or double dispatch.
-
-### Code Generation Conventions (MCP / eval)
-
-When writing Smalltalk code to be submitted via `mcp__smalltalk-interop__eval` or any HTTP eval endpoint:
-
-- **Line endings: LF only (`\n`).** Never use CRLF (`\r\n`). CRLF characters pass through the SIS eval handler verbatim and get stored in method sources, corrupting the Tonel export.
-- **Method body indentation: 2 spaces.** This is what Pharo's formatter produces and what `TonelWriter` exports.
-- **No trailing whitespace** on any line.
-- **`withInternalLineEndings`:** Always append to source strings when compiling methods to prevent "Linefeed" errors.
-
-**Before exporting to git**, run a reformat pass on all classes touched during the session:
-
-```smalltalk
-(Smalltalk packageOrganizer packageNamed: 'YourPackage') definedClasses
-    do: [ :cls |
-        cls methods do: [ :m | m reformat ].
-        cls class methods do: [ :m | m reformat ] ]
-```
+- **Nil Usage:** `nil` is **forbidden** except for lazy initialization logic.
+- **Collections:** Prefer immutable literal Arrays (e.g., `#(1 2 3)`) for static collections unless readability specifically suffers.
+- **Blocks & Cull:** When using `cull:`, remember it allows the block to accept *fewer* arguments than the sender provides. Do not flag this mismatch as an error; it is a feature.
+- **Cascades:** Prefer cascades (`;`) when sending multiple messages to the same receiver.
+- **Forbidden Selectors:** Code must never contain `halt`, `haltOnce`, or `flag:` in production/committed code.
+- **Line Endings:** When compiling strings (e.g., in tools/importers), always use `.withInternalLineEndings` to handle Pharo's CR requirements.
+- **Type Checking:** Avoid `isKindOf:` or `isMemberOf:`. Use polymorphism or double dispatch.
 
 ## 🧪 Testing Guidelines
-* **Existence:** Verify functional scenarios are covered. Do not fixate on calculated coverage percentages.
-* **Behavior, not state.** Assert on what instances respond to, not on their instance variables.
-* **Scenario names.** `testTransferReducesSourceBalance` over `testTransfer`. The name should describe the stimulus and the expected outcome.
-* **Invalid scenarios.** Every creation method's guard clause deserves a `should:raise:withMessageText:` test. See `create-smalltalk-code` §4.1.
-* **Independent tests.** Each test sets up its own world. Tests must be runnable in any order.
-* **Real objects for domain logic.** See the Mocking Policy above — mocks/stubs only at strict I/O boundaries.
+
+- **Existence:** Verify functional scenarios are covered. Do not fixate on calculated coverage percentages.
+- **Behavior, not state.** Assert on what instances respond to, not on their instance variables.
+- **Scenario names.** `testTransferReducesSourceBalance` over `testTransfer`. The name should describe the stimulus and the expected outcome.
+- **Invalid scenarios.** Every creation method's guard clause deserves a `should:raise:withMessageText:` test. See `create-smalltalk-code` §4.1.
+- **Independent tests.** Each test sets up its own world. Tests must be runnable in any order.
+- **Real objects for domain logic.** See the Mocking Policy above — mocks/stubs only at strict I/O boundaries.
 
 ## 🦨 Code Smells Quick Reference
 
@@ -304,7 +288,8 @@ When writing Smalltalk code to be submitted via `mcp__smalltalk-interop__eval` o
 
 Run through this list on every review — each item should have a clear "yes."
 
-**Design**
+### Design
+
 - [ ] Each class maps to exactly one domain concept (Bijection)?
 - [ ] Objects complete and valid at creation?
 - [ ] Behavior lives in objects, not in callers extracting data through accessors?
@@ -312,13 +297,15 @@ Run through this list on every review — each item should have a clear "yes."
 - [ ] `nil` used as a sentinel? Null Object instead?
 - [ ] Objects immutable where possible?
 
-**Naming**
+### Naming
+
 - [ ] Class names in domain language (not implementation roles)?
 - [ ] Method names reveal intention?
 - [ ] Collections use the `some` prefix? Variables use role-based names?
 - [ ] Any `Manager` / `Helper` / `Handler` / `Utils` hiding a missing concept?
 
-**Testing**
+### Testing
+
 - [ ] Each new behavior has a test?
 - [ ] Test names describe scenarios and outcomes?
 - [ ] Tests written before the implementation (TDD evidence)?
@@ -327,12 +314,14 @@ Run through this list on every review — each item should have a clear "yes."
 - [ ] Invalid-scenario guards covered by `should:raise:withMessageText:`?
 - [ ] Mocks only at I/O boundaries?
 
-**Coupling**
+### Coupling
+
 - [ ] New dependencies justified and minimal?
 - [ ] Inheritance only for genuine IS-A domain relationships?
 - [ ] Different domains kept separate? (No SQL in domain objects, no HTTP in models)
 
-**Simplicity**
+### Simplicity
+
 - [ ] Beck's four rules satisfied?
 - [ ] No unnecessary abstraction?
 - [ ] No premature optimization?

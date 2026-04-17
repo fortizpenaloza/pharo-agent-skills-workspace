@@ -1,6 +1,6 @@
 ---
 name: create-smalltalk-code
-description: Guide for creating Pharo Smalltalk (Pharo) classes, methods, and tests using the Fluid syntax. Covers fluid class definition, method compilation with withInternalLineEndings, test creation, deterministic testing, validation of invalid scenarios, and troubleshooting. Invoke before writing any Smalltalk code through the interop server.
+description: Guide for creating Pharo Smalltalk (Pharo) classes, methods, and tests. Covers fluid class definition, method compilation, test creation, deterministic testing, validation of invalid scenarios, and troubleshooting. Invoke before writing any Smalltalk code through the pharo-smalltalk MCP.
 ---
 
 # Create Smalltalk Class Skill
@@ -15,38 +15,27 @@ This skill outlines the standard procedure for modeling domain objects and creat
 Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferred way to define classes in Pharo.
 
 **Template:**
+
 ```smalltalk
 (Superclass << #ClassName
-	slots: { #slot1 . #slot2 };
-	package: 'PackageName') install.
+  slots: { #slot1 . #slot2 };
+  package: 'PackageName') install.
 ```
 
 **Example:**
+
 ```smalltalk
 (Object << #FVector
-	slots: { #x . #y };
-	package: 'FVectorModel') install.
+  slots: { #x . #y };
+  package: 'FVectorModel') install.
 ```
 
 **Verification:**
 Always verify the class was created successfully immediately after installation.
+
 ```smalltalk
 Smalltalk hasClassNamed: #ClassName
 ```
-
-**Alternative (equivalent, more verbose) — `ShiftClassInstaller`:**
-When the fluid syntax is unavailable or you need programmatic builder control, the `ShiftClassInstaller` produces an equivalent class:
-
-```smalltalk
-ShiftClassInstaller make: [ :builder |
-    builder
-        superclass: Object;
-        name: #ClassName;
-        slots: #(#var1 #var2);
-        package: 'PackageName' ]
-```
-
-Use the fluid `<<` form by default; reach for `ShiftClassInstaller` only when the fluid syntax cannot express what you need.
 
 ## 2. Method Compilation
 
@@ -55,30 +44,27 @@ Compile methods using `compile:classified:`. Ensure the class exists before comp
 **🚨 Tip:** To prevent "Linefeed" errors, always append withInternalLineEndings to the source string.
 
 **Template:**
+
 ```smalltalk
 ClassName compile: 'methodSelector: argument
-	^ return' withInternalLineEndings classified: 'protocol'.
+  ^ return' withInternalLineEndings classified: 'protocol'.
 ```
 
 **Example (Accessing):**
-```smalltalk 
+
+```smalltalk
 IS2Player compile: 'name
     ^ name' withInternalLineEndings classified: 'accessing'.
 ```
 
-**Example (Setter):**
-```smalltalk
-FVector compile: 'x: anInteger
-	x := anInteger' withInternalLineEndings classified: 'accessing'.
-```
-
 **Example (Logic):**
+
 ```smalltalk
 FVector compile: '+ aVector
-	^ FVector new
-		x: (x + aVector x);
-		y: (y + aVector y);
-		yourself' withInternalLineEndings classified: 'arithmetic'.
+  ^ FVector new
+    x: (x + aVector x);
+    y: (y + aVector y);
+    yourself' withInternalLineEndings classified: 'arithmetic'.
 ```
 
 ### 2.1 Class-Side Creation Methods
@@ -86,6 +72,7 @@ FVector compile: '+ aVector
 Follow the **Creation Method Pattern** from `smalltalk-conventions`: a public class-side method that reads as a sentence, delegating to a private instance-side `initialize...` method. Use `ClassName class compile:` for class-side methods.
 
 **Class-side (public API):**
+
 ```smalltalk
 FVector class compile: 'x: anXCoordinate y: aYCoordinate
 
@@ -93,6 +80,7 @@ FVector class compile: 'x: anXCoordinate y: aYCoordinate
 ```
 
 **Instance-side (private initialization):**
+
 ```smalltalk
 FVector compile: 'initializeX: anXCoordinate y: aYCoordinate
 
@@ -101,12 +89,14 @@ FVector compile: 'initializeX: anXCoordinate y: aYCoordinate
 ```
 
 **Accessing method (no setter — read-only):**
+
 ```smalltalk
 FVector compile: 'x
   ^ x' withInternalLineEndings classified: 'accessing'.
 ```
 
 **Refactored logic using the creation method (no public setters, immutable result):**
+
 ```smalltalk
 FVector compile: '+ aVector
   ^ self class x: x + aVector x y: y + aVector y' withInternalLineEndings classified: 'arithmetic'.
@@ -126,20 +116,23 @@ When submitting code via `mcp__smalltalk-interop__eval`:
 Create a test class subclassing `TestCase`.
 
 **Template:**
+
 ```smalltalk
 (TestCase << #ClassNameTest
-	slots: {};
-	package: 'PackageName') install.
+  slots: {};
+  package: 'PackageName') install.
 ```
 
 **Example:**
+
 ```smalltalk
 (TestCase << #FVectorTest
-	slots: {};
-	package: 'FVectorTest') install.
+  slots: {};
+  package: 'FVectorTest') install.
 ```
 
 A common convention is to place tests in a sibling package named `PackageName-Tests`:
+
 ```smalltalk
 (TestCase << #FVectorTest
     slots: {};
@@ -151,16 +144,18 @@ A common convention is to place tests in a sibling package named `PackageName-Te
 Write test methods ensuring they start with `test`.
 
 **Template:**
+
 ```smalltalk
 ClassNameTest compile: 'testFeature
-	| instance result |
-	instance := ClassName new.
-	"Setup"
-	result := instance someOperation.
-	self assert: result equals: expectedValue.' withInternalLineEndings classified: 'tests'.
+
+  | instance result |
+  instance := ClassName new.
+  result := instance someOperation.
+  self assert: result equals: expectedValue.' withInternalLineEndings classified: 'tests'.
 ```
 
 **Example (behavioral scenario, using the creation method):**
+
 ```smalltalk
 FVectorTest compile: 'testVectorAddition
 
@@ -175,6 +170,7 @@ FVectorTest compile: 'testVectorAddition
 For every creation method, add tests that check invalid cases are rejected (e.g., negative values, empty collections, incompatible parameters). Use `should:raise:withMessageText:` to assert both the exception class and the message.
 
 **Example (guarding number of sides):**
+
 ```smalltalk
 DieTest compile: 'testNegativeFacesAreNotAllowed
 
@@ -182,6 +178,7 @@ DieTest compile: 'testNegativeFacesAreNotAllowed
 ```
 
 **Example (guarding player list):**
+
 ```smalltalk
 GameTest compile: 'testAtLeastOnePlayerInTheGame
 
@@ -189,6 +186,7 @@ GameTest compile: 'testAtLeastOnePlayerInTheGame
 ```
 
 **Example (guarding user age):**
+
 ```smalltalk
 UserTest compile: 'testNegativeAgeIsRejected
 
@@ -202,6 +200,7 @@ Pair every happy-path test with at least one invalid-scenario test covering each
 When dealing with randomness (e.g., dice rolls), create a subclass or a mock object to control the output.
 
 **Example (Mock Die):**
+
 ```smalltalk
 (IS2Die << #IS2LoadedDie
 	slots: { #rollResult };
@@ -212,6 +211,7 @@ IS2LoadedDie compile: 'roll
 ```
 
 **Example (Loaded die using the full creation method pattern):**
+
 ```smalltalk
 (Die << #LoadedDie
     slots: { #rollResult };
@@ -234,7 +234,7 @@ Reminder (from `smalltalk-conventions`): mocks/stubs are permitted **only at str
 
 ## 6. Execution & Verification
 
-Run tests using the MCP tool `mcp__smalltalk-interop__run_class_test` (the legacy name `mcp_pharo_run_class_test` refers to the same operation).
+Run tests using the MCP tool `mcp__pharo-smalltalk__run_class_test`.
 
 ```json
 {
@@ -243,6 +243,7 @@ Run tests using the MCP tool `mcp__smalltalk-interop__run_class_test` (the legac
 ```
 
 Verify that the test actually ran:
+
 - **Red** before implementation: `MessageNotUnderstood` (class/method missing) or assertion failure for the right reason.
 - **Green** after implementation: all tests pass and the Transcript is clean.
 
