@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "pharo-smalltalk": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network=host",
+        "-e",
+        "PHARO_SIS_URL=http://localhost:8086",
+        "-e",
+        "FAST_MCP_LOG_LEVEL=ERROR",
+        "-e",
+        "PYTHONUNBUFFERED=1",
+        "pharo-smalltalk-interop-mcp-server:latest"
+      ],
+      "env": {}
+    }
+  }
+}

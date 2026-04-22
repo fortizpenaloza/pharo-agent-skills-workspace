@@ -1,6 +1,6 @@
 ---
 name: create-smalltalk-code
-description: Guide for creating Pharo Smalltalk (Pharo) classes, methods, and tests using the Fluid syntax.
+description: Guide for creating Smalltalk (Pharo or GS64) classes, methods, and tests using the Fluid syntax.
 ---
 
 # Create Smalltalk Class Skill
@@ -12,26 +12,21 @@ This skill outlines the standard procedure for modeling domain objects and creat
 
 ## 1. Class Creation
 
-Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferred way to define classes in Pharo.
+Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferred way to define classes in Pharo. Always 
+verify the class was created successfully immediately after installation.
 
 **Template:**
+
 ```smalltalk
-(Superclass << #ClassName
-	slots: { #slot1 . #slot2 };
-	package: 'PackageName') install.
+(Superclass << #ClassName slots: { #slot1 . #slot2 }; package: 'PackageName') install.
+'Class <1s> installed successfully' expandMacrosWith: Smalltalk at: #ClassName
 ```
 
 **Example:**
-```smalltalk
-(Object << #FVector
-	slots: { #x . #y };
-	package: 'FVectorModel') install.
-```
 
-**Verification:**
-Always verify the class was created successfully immediately after installation.
 ```smalltalk
-Smalltalk hasClassNamed: #ClassName
+(Object << #FVector slots: { #x . #y }; package: 'FVectorModel') install.
+'Class <1s> installed successfully' expandMacrosWith: Smalltalk at: #FVector
 ```
 
 ## 2. Method Compilation
@@ -41,30 +36,34 @@ Compile methods using `compile:classified:`. Ensure the class exists before comp
 **🚨 Tip:** To prevent "Linefeed" errors, always append withInternalLineEndings to the source string.
 
 **Template:**
+
 ```smalltalk
 ClassName compile: 'methodSelector: argument
-	^ return' withInternalLineEndings classified: 'protocol'.
+    ^ return' withInternalLineEndings classified: 'protocol'.
 ```
 
 **Example (Accessing):**
-```smalltalk 
+
+```smalltalk
 IS2Player compile: 'name
     ^ name' withInternalLineEndings classified: 'accessing'.
 ```
 
 **Example (Setter):**
+
 ```smalltalk
 FVector compile: 'x: anInteger
-	x := anInteger' withInternalLineEndings classified: 'accessing'.
+    x := anInteger' withInternalLineEndings classified: 'accessing'.
 ```
 
 **Example (Logic):**
+
 ```smalltalk
 FVector compile: '+ aVector
-	^ FVector new
-		x: (x + aVector x);
-		y: (y + aVector y);
-		yourself' withInternalLineEndings classified: 'arithmetic'.
+    ^ FVector new
+        x: (x + aVector x);
+        y: (y + aVector y);
+        yourself' withInternalLineEndings classified: 'arithmetic'.
 ```
 
 ## 3. Test Creation
@@ -72,6 +71,7 @@ FVector compile: '+ aVector
 Create a test class subclassing `TestCase`.
 
 **Template:**
+
 ```smalltalk
 (TestCase << #ClassNameTest
 	slots: {};
