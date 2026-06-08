@@ -7,14 +7,6 @@ description: Use when writing Smalltalk code (Pharo or GS64) and considering whi
 
 The [ba-st](https://github.com/ba-st) GitHub organization publishes a set of composable Smalltalk libraries targeting Pharo (10–13) and GemStone/S 64 (3.7.x). They are deliberately small, deeply tested, and stack cleanly. This skill is the routing table. When you are picking tools for a Smalltalk project, use it to find the right per-framework skill.
 
-## Local repository location
-
-All 10 projects are checked out under `/home/mtabacman/Development/Repos/ba-st-skills/`. Each repository follows the same layout:
-- `source/` — the Smalltalk packages (Tonel format)
-- `rowan/` — Rowan spec for GS64 loading
-- `docs/` — `how-to/`, `reference/`, `explanation/`, `tutorial/` (a la [Diátaxis](https://diataxis.fr/))
-- `BaselineOf<Name>` in `source/` — Metacello baseline with load groups
-
 ## Project map
 
 | Project | Purpose | Use when you need… | Skill |
