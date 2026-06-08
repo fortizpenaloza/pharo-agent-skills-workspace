@@ -12,8 +12,7 @@ This skill outlines the standard procedure for modeling domain objects and creat
 
 ## 1. Class Creation
 
-Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferred way to define classes in Pharo. Always 
-verify the class was created successfully immediately after installation.
+Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferred way to define classes in Pharo. Always verify the class was created successfully immediately after installation.
 
 **Template:**
 
