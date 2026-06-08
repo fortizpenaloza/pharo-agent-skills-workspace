@@ -8,7 +8,7 @@ This is the team's durable home for the Smalltalk conventions, process guidance,
 - `.agent/reference/ba-libraries/` — library API surface for the ba-st open-source dependencies the Abbaco APIs consume. Not skills; just documentation a session reads on demand.
 - Project-level artefacts (specifications, implementation plans, the Pharo image) live at the workspace root or in dedicated subdirectories per project.
 
-This workspace is portable across Pharo projects. **Keep it project-agnostic.** When a session captures something worth keeping for the whole team, promote it into a SKILL.md or into this file — never let the projects-specific examples leak into the shared playbook.
+This workspace is portable across Pharo projects. **Keep it project-agnostic.** When a session captures something worth keeping for the whole team, promote it into a SKILL.md or into this file — never let the project-specific examples leak into the shared playbook.
 
 ## Working with Pharo via MCP
 
