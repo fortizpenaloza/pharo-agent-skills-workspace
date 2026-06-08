@@ -12,7 +12,7 @@ This skill outlines the standard procedure for modeling domain objects and creat
 
 ## 1. Class Creation
 
-Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferred way to define classes in Pharo.
+Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferred way to define classes in Pharo. Always verify the class was created successfully immediately after installation.
 
 **Template:**
 
@@ -34,7 +34,8 @@ Use the **Fluid Class Definition** syntax (`<<`). This is the modern and preferr
 Always verify the class was created successfully immediately after installation.
 
 ```smalltalk
-Smalltalk hasClassNamed: #ClassName
+(Object << #FVector slots: { #x . #y }; package: 'FVectorModel') install.
+'Class <1s> installed successfully' expandMacrosWith: (Smalltalk at: #FVector)
 ```
 
 ## 2. Method Compilation
