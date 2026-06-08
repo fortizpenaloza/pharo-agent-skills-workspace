@@ -1,1 +1,5 @@
 **/.DS_Store
+
+# Per-session Claude memory is intentionally per-developer, not shared with the team.
+# See CLAUDE.md — "Memory discipline" section.
+.claude/memory/
