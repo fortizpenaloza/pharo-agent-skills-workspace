@@ -36,7 +36,7 @@ Always verify the class was created successfully immediately after installation.
 
 ```smalltalk
 (Object << #FVector slots: { #x . #y }; package: 'FVectorModel') install.
-'Class <1s> installed successfully' expandMacrosWith: Smalltalk at: #FVector
+'Class <1s> installed successfully' expandMacrosWith: (Smalltalk at: #FVector)
 ```
 
 ## 2. Method Compilation
