@@ -4,7 +4,7 @@ This is the team's durable home for the Smalltalk conventions, process guidance,
 
 ## Purpose of this workspace
 
-- `.agent/skills/` — the playbook. Mandatory conventions, the Smalltalk creation process, the TDD discipline, and the four-part Abbaco API family (`abbaco-api-house-style` + `abbaco-api-domain-model` + `abbaco-api-persistence` + `abbaco-api-rest-controller` + `abbaco-api-testing`).
+- `.agent/skills/` — the playbook. Mandatory conventions, the Smalltalk creation process, the TDD discipline, and the five-part Abbaco API family (`abbaco-api-house-style` + `abbaco-api-domain-model` + `abbaco-api-persistence` + `abbaco-api-rest-controller` + `abbaco-api-testing`).
 - `.agent/reference/ba-libraries/` — library API surface for the ba-st open-source dependencies the Abbaco APIs consume. Not skills; just documentation a session reads on demand.
 - Project-level artefacts (specifications, implementation plans, the Pharo image) live at the workspace root or in dedicated subdirectories per project.
 
