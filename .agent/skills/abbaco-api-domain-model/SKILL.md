@@ -38,7 +38,7 @@ Portfolio class >> assertNameIsValid: aName [
 Portfolio class >> assertDescriptionIsValid: aDescription [
 
     AssertionChecker
-        enforce: [ aDescription isString and: [ aDescription size <= 250 ] ]
+        enforce: [ aDescription size <= 250 ]
         because: 'The portfolio description cannot be longer than 250 characters'
         raising: InstanceCreationFailed
 ]
