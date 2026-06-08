@@ -29,7 +29,7 @@ Class {
 Portfolio class >> assertNameIsValid: aName [
 
     AssertionChecker
-        enforce: [ aName isString and: [ aName notEmpty and: [ aName size <= 40 ] ] ]
+        enforce: [ aName notEmpty and: [ aName size <= 40 ] ]
         because: 'The portfolio name must be a non-empty string of at most 40 characters'
         raising: InstanceCreationFailed
 ]
