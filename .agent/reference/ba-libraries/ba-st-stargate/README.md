@@ -165,7 +165,7 @@ builder createEntityTagWith: [ :pet :mediaType :ctx :handler |
 
 The framework automatically:
 - answers `304 Not Modified` when `If-None-Match` matches,
-- answers `412 Precondition Failed` when `If-Match` does not match on PUT/PATCH/DELETE, and `428 Precondition Required` when a write that requires `If-Match` omits it (`from:within:get:thenUpdateWith:` enforces this — no manual ETag handling in the controller).
+- answers `412 Precondition Failed` when `If-Match` does not match on writes implemented with `from:within:get:thenUpdateWith:` (typically PUT/PATCH), and `428 Precondition Required` when such a write omits it (`from:within:get:thenUpdateWith:` enforces this — no manual ETag handling in the controller).
 
 ## Caching (Cache-Control)
 
