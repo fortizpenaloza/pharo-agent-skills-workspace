@@ -160,6 +160,28 @@ PortfolioCompositionsSystem >> withCompositionOf: aPortfolio
                                 ifNone: aNoneBlock
 ```
 
+The workhorse body must use the **RDBMS-portable criteria-builder form** — it runs against both the
+in-memory tests and Postgres (see `abbaco-api-persistence` §7). Not `and:` (→ `mustBeBoolean`), not a
+derived-method comparison like `each parent identifier = …` (→ "no mapping"), not a 2-arg comparator
+sort:
+
+```smalltalk
+PortfolioCompositionsSystem >> withCompositionOf: aPortfolio effectiveAt: aDate do: aFoundBlock ifNone: aNoneBlock
+    ^ compositions
+        withOneMatching: [ :each :criteria |
+            criteria
+                satisfying: ( criteria does: each portfolio equal: aPortfolio )
+                and: [ each effectiveFrom <= aDate ] ]
+        sortedBy: [ :each | each effectiveFrom ] descending
+        do: aFoundBlock
+        else: aNoneBlock
+```
+
+When the stored historical object is an `Identified<Thing>` wrapper embedding a value object (the usual
+case), the parent reference and `effectiveFrom` live on the embedded object, so navigate through the
+embed attribute (`each composition portfolio`, `each composition effectiveFrom`) — and make sure the
+wrapper exposes that accessor so the same path resolves in-memory (see §2 and `abbaco-api-persistence` §4).
+
 **Retroactive fix-up is a first-class API surface.** A teammate discovers yesterday's update was missed → call `updatePortfolio:...effectiveFrom: yesterday`. The system inserts a row with `effectiveFrom = yesterday`; `compositionOf: portfolio effectiveAt: yesterday` immediately resolves to it because the new row's `effectiveFrom` is now the latest ≤ yesterday. No previous row needs to be edited.
 
 **No-op short-circuit.** If the proposed members are identical (set-equality) to whatever's effective at `aDate` already, the update skips writing a new row — duplicating an effective row would only bloat history. Use the block-based `with<HistoricalThing>do:ifNone:` to check; the `ifNone:` branch (no row at all at that date) is also a "write a new row" path.
@@ -227,6 +249,14 @@ IdentifiedPortfolio >> asPortfolio [
 
     ^ portfolio
 ]
+
+{ #category : 'accessing' }
+IdentifiedPortfolio >> portfolio [
+    "Same value object as asPortfolio, exposed under the slot/embed-attribute name so the
+     `each portfolio <field>` query-navigation path resolves identically in-memory and against RDBMS."
+
+    ^ portfolio
+]
 ```
 
 ### Why the wrapper carries `sequentialNumber`
@@ -236,6 +266,8 @@ Sagan's `SequentialNumberMappingDefinition` and `SequentialNumberFieldDefinition
 ### `asPortfolio` and the synchronize boundary
 
 `synchronizeWith:` on the wrapper unwraps the right-hand side via `asPortfolio` and delegates to the value object. This keeps the value object oblivious to wrapping. Sagan calls `original synchronizeWith: anUpdated` from `update:executing:` (see `RDBMSRepository.class.st` line 192-198), passing whatever shape the application handed to `update:`. Always pass a wrapper — see the management system's `update<Thing>:with:` below.
+
+**Expose the value object under the embed-attribute name too.** Persistence maps the wrapper by *embedding* the value object in the `portfolio` slot, and RDBMS queries reach the value object's fields by navigating that attribute — `each portfolio owner` works, `each owner` raises "no mapping". So the wrapper also provides a plain `portfolio` accessor (shown above) alongside `asPortfolio`; the in-memory criteria evaluate the identical `each portfolio …` path on the real wrapper. See `abbaco-api-persistence` §4.
 
 ### Identifier comparison
 
@@ -313,8 +345,16 @@ PortfolioManagementSystem >> initializePortfolios [
         createRepositoryFor: #mainDB
         storingObjectsOfType: IdentifiedPortfolio
         checkingConflictsAccordingTo:
+            "Compound uniqueness (name per owner). The `accordingTo:` criteria-builder form
+             works in-memory AND against RDBMS; the `forSingleAspectMatching: [ :p | a -> b ]`
+             Association form does NOT — it fails against Postgres. See abbaco-api-persistence §8."
             ( CriteriaBasedConflictCheckingStrategy
-                forSingleAspectMatching: [ :portfolio | portfolio name -> portfolio owner ] ).
+                accordingTo: [ :each :criteria :aPortfolio |
+                    criteria
+                        satisfying: ( each owner = aPortfolio owner )
+                        and: [ each name = aPortfolio name ] ]
+                explainingConflictWith: [ :aPortfolio |
+                    'There is already a portfolio named "' , aPortfolio name , '" owned by ' , aPortfolio owner ] ).
 
     PortfolioRDBMSMappingConfiguration new cull: portfolios
 ]
@@ -387,9 +427,10 @@ PortfolioManagementSystem >> identifierOf: anIdentifiedPortfolio [
   ```
   This selector is provided by `Sagan-Kepler/RepositoryProviderSystem`. The `#mainDB` symbol matches the name under which the application registered the provider (see `abbaco-api-persistence`).
 - **Apply the mapping immediately after creating the repository**: `PortfolioRDBMSMappingConfiguration new cull: portfolios`. The mapping configuration is `cull:`-applicable — it accepts a repository and configures it. (See `RDBMSMappingConfiguration.class.st`.)
-- **Conflict checking** uses `CriteriaBasedConflictCheckingStrategy forSingleAspectMatching:` with a block (or symbol) that extracts the unique aspect. For composite uniqueness, return an `Association` or array. Use `DoNotCheckForConflictsStrategy new` when there is no business uniqueness constraint (e.g. trials are unique by user, but historical paid subscriptions allow many per user with different statuses).
+- **Conflict checking**: a *single* unique attribute uses `forSingleAspectMatching: #name` (unary selector). **Compound uniqueness must use `accordingTo:explainingConflictWith:`** with the criteria builder — the `forSingleAspectMatching: [ :p | a -> b ]` Association form works in-memory but fails against RDBMS (`GlorpDatabaseReadError: Invalid data type`); see `abbaco-api-persistence` §8. Use `DoNotCheckForConflictsStrategy new` when there is no business uniqueness constraint (e.g. trials are unique by user, but historical paid subscriptions allow many per user with different statuses).
 - **Lookup**: `withOneWhere: #identifier is: anIdentifier asString do: … else: …`. Always provide an `else:` that signals `ObjectNotFound` with a human-readable message. The `asString` is required because UUIDs are stored as strings.
 - **Updates** go through `update:executing:` with an explicit `synchronizeWith:` block. This gives Sagan a transactional context and ensures the conflict-checking strategy reruns. Do not write through `findAllMatching:` results directly.
+- **Repository query blocks must be RDBMS-portable.** Write every `findAllMatching:` / `withOneMatching:…` filter in the 2-arg criteria-builder form (`[ :each :criteria | criteria satisfying: … and: [ … ] ]`) and every sort as a property sort (`#field descending` or `[ :each | each path ] descending`) — never `and:`/`or:`, derived-method navigation (`each x identifier`), or 2-arg comparator sorts, which pass in-memory and fail against Postgres. See `abbaco-api-persistence` §7 (Query criteria).
 - **Method categories**: `instance creation`, `registering`, `installing`, `initialization`, `private`, `private - lifecycle`, `management`, `querying`, `updating`, `accessing`.
 
 ### Active/inactive resources

@@ -132,6 +132,8 @@ Standard CRUD route table:
 
 **Reads are unauthenticated; writes require the `authenticationFilter`**. To add an authenticated route, wrap the `RouteSpecification` and send `authenticatedBy: authenticationFilter` (see the `Create` / `Update` / `Delete` examples above).
 
+> The generated `route urlTemplate` carries a **leading slash** — `/portfolios`, `/portfolios/<identifier:IsUUID>`. Assert exactly that form in `testRoutes` (see `abbaco-api-testing` §3).
+
 ### Action endpoints (activate / deactivate / cancel / …)
 
 When a resource has an explicit lifecycle transition that does not fit CRUD, declare an action route:
@@ -193,8 +195,7 @@ PortfolioRESTfulController >> initializeRequestHandler [
             caching
                 when: [ :response | response contentType = self portfolioVersion1dot0dot0MediaType ]
                 apply: [ caching
-                    expireIn: 1 hour;
-                    bePublic;
+                    beAvailableFor: 1 hour;   "→ public, max-age=3600 (see caching note below)"
                     mustRevalidate ] ];
         build
 ]
@@ -206,14 +207,14 @@ The builder API (full surface in `RESTfulRequestHandlerBuilder` — inspect via 
 |---|---|
 | `handling: anEndpoint locatingResourcesWith: <block> extractingIdentifierWith: <block>` | Sets the URL tail (`'portfolios'`), how to compute a stored resource's location identifier, and how to pull the identifier out of the URL. |
 | `beHypermediaDriven` | Adds `self`-link to every encoded resource. |
-| `beHypermediaDrivenBy: aBlock` | Same plus a per-resource block that adds action links (`activate`, `deactivate`, …). The block receives `( :builder :resource :requestContext :resourceLocation )`. |
-| `paginateCollectionsWithDefaultLimit: anInteger` | Enables pagination on collection endpoints; clients can override with `?limit=`. |
+| `beHypermediaDrivenBy: aBlock` | Same plus a per-resource block that adds action links (`activate`, `deactivate`, …). The block receives `( :builder :resource :requestContext :resourceLocation )`. **`builder addLink: aUrl relatedTo: 'rel'` needs a `ZnUrl`/URL, not a bare `String`** (a String is parsed as an RFC Link-header value → "Missing <"); append sub-resource segments on the ZnUrl: `resourceLocation / 'metrics'`. |
+| `paginateCollectionsWithDefaultLimit: anInteger` | Enables pagination on collection endpoints; clients page with `?start=` and `?limit=` (read by the policy via `httpRequest at: #start` / `#limit`). Read any other query parameter with `httpRequest at: 'name' ifAbsent: [ … ]`. |
 | `decodeToNeoJSONObjectWhenAccepting: aMediaType` | Default decoder: parse the body as a `NeoJSONObject` and pass it to the API method. Use this when no domain-side `createInstanceUsing:` mapping is needed. |
 | `whenAccepting: aMediaType decodeFromJsonApplying: <block>` | Custom decoder. The block receives the JSON string and a `NeoJSONReader`; configure the reader inside (typical pattern: see Section 4). |
 | `whenResponding: aMediaType encodeToJsonApplying: <block>` | Encoder block called with `( :resource :requestContext :writer )`; configure the `writer` (a `NeoJSONWriter`). |
 | `whenResponding: aMediaType encodeToJsonApplying: <block> as: aSymbol` | Same but the writer's mapping key is `aSymbol`. Useful when multiple types share the encoder block. |
 | `createEntityTagHashing: <block>` | Define which fields contribute to the ETag. The block receives `( :hasher :resource :requestContext )` and uses `hasher include: <value>` per field. The media type is folded in automatically. |
-| `directCachingWith: <block>` | Configure `Cache-Control`. Use `caching when: <conditionBlock> apply: <directiveBlock>` to vary by media type. Available directives: `expireIn:`, `bePublic`, `bePrivate`, `mustRevalidate`, `doNotTransform`, `noCache`, `noStore`. |
+| `directCachingWith: <block>` | Configure `Cache-Control`. `caching when: <condBlock> apply: <directiveBlock>` varies by response (the condition block is culled with `(response, resource)`, so you can branch on the resource). **`expireIn:` sets the `Expires` header, NOT `max-age`** — `max-age` comes from `beStaleAfter:` / `beAvailableFor:` (the latter = `bePublic` + `beStaleAfter:` + `expireIn:`). Other directives: `beImmutable`, `bePublic`, `bePrivate`, `mustRevalidate`, `doNotTransform`, `doNotCache`, `doNotStore`. |
 | `build` | Realize the handler. Always last. |
 
 The builder enforces ordering via `AssertionChecker` — for example, `beHypermediaDrivenBy:` requires that the resource locator is configured first and that no encoding rules are set yet (see `RESTfulRequestHandlerBuilder>>beHypermediaDrivenBy:`). Follow the order shown above.
@@ -274,6 +275,8 @@ whenAccepting: self portfolioVersion1dot0dot0MediaType
 This routes decoded payloads through the value object's `named:…` factory, so its `AssertionChecker` preconditions fire on invalid input. Stargate translates `InstanceCreationFailed` into HTTP 400 / 422 automatically.
 
 For simpler endpoints (especially PATCH where the client sends a partial document), use `decodeToNeoJSONObjectWhenAccepting:` and let the API method pull individual fields with `decoded at: #name ifAbsent: [ existing name ]`. See the pet-store update method (`PetsRESTfulController>>updatePetBasedOn:within:`) for that pattern.
+
+> **`NeoJSONObject >> at:` returns `nil` for a missing key** (keys are symbols) — it does *not* raise. So `decodeToNeoJSONObjectWhenAccepting:` works for **POST too** (no DTO class needed; read `decoded at: #name`). For a **required** POST field, force a clean 400 with `decoded at: #name ifAbsent: [ KeyNotFound signalFor: #name ]` (KeyNotFound → `badRequest`). For PATCH, default to the existing value: `decoded at: #name ifAbsent: [ original name ]`. Letting a missing field flow through as `nil` into a factory yields a `MessageNotUnderstood` (500), not a 400.
 
 ## 5. API operation methods
 
@@ -369,6 +372,9 @@ PortfolioRESTfulController >> deletePortfolioBasedOn: httpRequest within: reques
   - `withRepresentationIn:within:createResourceWith:thenDo:` → 201 Created with body and `Location` header.
   - `from:within:get:thenUpdateWith:` → 200 OK with updated body.
   - `from:within:get:thenDo:` → 204 No Content. **Use this for action endpoints and DELETE.**
+- **Domain exceptions become RAISED `HTTPClientError`s** (not response objects) at the controller-method layer: `ObjectNotFound→notFound(404)`, `ConflictingObjectFound→conflict(409)`, `InstanceCreationFailed→unprocessableEntity(422)`, `KeyNotFound`/`NeoJSONParseError→badRequest(400)`. The HTTP server converts the raise to a response; a **direct controller call (and controller tests) sees the raise**, so don't `on:do:` them, and assert error paths with `should: […] raise: HTTPClientError <kind>` (only success paths return a `ZnResponse`). The validation/conflict hooks fire *inside* the handler blocks: `InstanceCreationFailed` raised in `createResourceWith:` / `thenUpdateWith:` → 422; `ConflictingObjectFound` raised when storing → 409.
+- **PATCH auto-enforces `If-Match`.** `from:within:get:thenUpdateWith:` reads `If-Match` and asserts it before applying the update: missing → `428 preconditionRequired`, stale → `412 preconditionFailed`. No manual ETag plumbing in the controller. (`from:within:get:thenDo:`, used by DELETE, does **not** enforce `If-Match`.)
+- **`createResourceWith: aBlock thenDo: bBlock` runs `bBlock value: (aBlock value: decoded)`** — `thenDo:` receives only the creation block's *result*, not `decoded`. To thread extra decoded data (e.g. an owned collection) into `thenDo:`, return an `Association`/pair from `createResourceWith:` and unpack it there; validate that data **inside** `createResourceWith:` so its `InstanceCreationFailed` maps to 422.
 
 ### Action endpoints are idempotent and return 204
 

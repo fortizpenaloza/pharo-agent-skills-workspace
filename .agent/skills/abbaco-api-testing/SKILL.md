@@ -226,9 +226,18 @@ PortfolioRESTfulControllerTest >> baseUrl [
 { #category : 'running' }
 PortfolioRESTfulControllerTest >> setUp [
 
+    | repositorySystem |
+
+    "Register the subsystems DIRECTLY — the `<Thing>ManagementModule`'s `toInstallOn:` only stores
+     the root system (it registers on `install`), so `<Module> toInstallOn: rootSystem` alone leaves
+     `rootSystem >> #<Thing>ManagementSystem` unresolved ('System implementing … not found'). This
+     direct form mirrors the domain user-story test's setUpRequirements and always works."
     rootSystem := CompositeSystem new.
-    InMemoryRepositoryProviderModule toInstallOn: rootSystem.
-    PortfolioManagementModule toInstallOn: rootSystem.
+    repositorySystem := RepositoryProviderSystem new.
+    repositorySystem register: InMemoryRepositoryProvider new as: #mainDB.
+    rootSystem
+        register: repositorySystem;
+        register: PortfolioManagementSystem new.
     rootSystem startUp.
 
     super setUp  "calls setUpResourceController"
@@ -267,11 +276,11 @@ PortfolioRESTfulControllerTest >> testRoutes [
     self
         assert: routeSummaries
         equals: #(
-            'DELETE portfolios/<identifier:IsUUID>'
-            'GET portfolios'
-            'GET portfolios/<identifier:IsUUID>'
-            'PATCH portfolios/<identifier:IsUUID>'
-            'POST portfolios' )
+            'DELETE /portfolios/<identifier:IsUUID>'
+            'GET /portfolios'
+            'GET /portfolios/<identifier:IsUUID>'
+            'PATCH /portfolios/<identifier:IsUUID>'
+            'POST /portfolios' )   "urlTemplate carries a LEADING SLASH"
 ]
 
 { #category : 'tests - creation' }
@@ -311,14 +320,16 @@ PortfolioRESTfulControllerTest >> testGetPortfoliosWhenNoneAreManaged [
 { #category : 'tests - querying' }
 PortfolioRESTfulControllerTest >> testGetPortfolioNotFound [
 
-    | response |
-
-    response := resourceController
-        getPortfolioBasedOn: ( self
-            requestToGETResourceIdentifiedBy: UUID new asString
-            accepting: resourceController portfolioVersion1dot0dot0MediaType )
-        within: self newHttpRequestContext.
-    self assert: response isNotFound
+    "The handler maps ObjectNotFound to a RAISED HTTPClientError at this layer (the HTTP
+     server would turn it into a 404 response). So assert the raise, not `response isNotFound`."
+    self
+        should: [
+            resourceController
+                getPortfolioBasedOn: ( self
+                    requestToGETResourceIdentifiedBy: UUID new asString
+                    accepting: resourceController portfolioVersion1dot0dot0MediaType )
+                within: self newHttpRequestContext ]
+        raise: HTTPClientError notFound
 ]
 
 { #category : 'tests - querying' }
@@ -451,13 +462,13 @@ PortfolioRESTfulControllerTest >> getPortfolioIdentifiedBy: anIdentifier [
 ### Conventions
 
 - **Superclass `SingleResourceRESTfulControllerTest`** (Stargate-SUnit). Provides `requestToPOST:as:`, `requestToGETResourceIdentifiedBy:accepting:`, `requestToGETResourceIdentifiedBy:accepting:conditionalTo:`, `requestToDELETEResourceIdentifiedBy:`, `newHttpRequestContext`, `parametersWith:`, `withJsonFromContentsIn:do:`, `withJsonFromItemsIn:do:`, etc.
-- **`setUp`** builds a Kepler `CompositeSystem`, installs `InMemoryRepositoryProviderModule` (Sagan-Kepler ships this) plus the `<Thing>ManagementModule` under test, calls `startUp`, then calls `super setUp` so the inherited `setUp` triggers `setUpResourceController`.
+- **`setUp`** builds a Kepler `CompositeSystem` and **registers the subsystems directly** — a `RepositoryProviderSystem` holding `InMemoryRepositoryProvider new as: #mainDB`, plus `<Thing>ManagementSystem new` (and any dependency systems) — calls `startUp`, then `super setUp` (which triggers `setUpResourceController`). Do **not** rely on `<Thing>ManagementModule toInstallOn: rootSystem` alone: that `toInstallOn:` only *stores* the root system (registration happens on `install`), so the interface never resolves ("System implementing … not found"). If you prefer modules, call `(… toInstallOn: rootSystem) install` and register `InstalledModuleRegistrationSystem` first — the direct form skips that ceremony.
 - **`setUpResourceController`** instantiates the controller against the test's `rootSystem`, with `self authenticationFilter` — provide a no-op filter (or Stargate's built-in `JWTBearerAuthenticationFilter` configured with a test secret) so auth flows can be exercised explicitly.
 - **`tearDown`** calls `rootSystem shutDown` to release subsystems and resets the slot. Always wrap in `ifNotNil:`.
 - **`newWriteHttpRequestContext`** must be defined locally to add `requiredPermissionForWriting` for tests that exercise authenticated writes successfully.
 - **Drive the controller's API methods directly** — no real HTTP server in this layer.
-- **Assert every dimension** of the response: `isSuccess`/`isCreated`/`isNoContent`/`isNotModified`/`isNotFound`, `contentType asMediaType`, `hasEntity`, `location`, body shape via `withJsonFromContentsIn:do:` / `withJsonFromItemsIn:do:`.
-- **Cache-Control gotcha**: `( response headers at: 'Cache-Control' )` returns an **`Array`** (Zinc multi-value header), not a string. Use `anySatisfy: [ :directive | directive includesSubstring: '<expected-seconds>' ]`.
+- **Assert success dimensions** on the returned response: `isSuccess`/`isCreated`/`isNoContent`/`isNotModified`, `contentType asMediaType`, `hasEntity`, `location`, body shape via `withJsonFromContentsIn:do:` / `withJsonFromItemsIn:do:`. **Error paths RAISE** an `HTTPClientError` (`notFound` / `conflict` / `unprocessableEntity` / `badRequest` / `forbidden`) at this layer rather than returning a response — assert them with `should: […] raise: HTTPClientError <kind>` (see `abbaco-api-rest-controller` §5).
+- **Cache-Control gotcha**: `( response headers at: 'Cache-Control' )` returns an **`Array`** (Zinc multi-value header), not a string. Use `anySatisfy: [ :directive | directive includesSubstring: '<expected-seconds>' ]`. The `max-age` seconds appear **only if the controller used `beAvailableFor:` / `beStaleAfter:`** — `expireIn:` alone sets `Expires`, not `max-age`, so a test asserting `'3600'` against an `expireIn:`-based controller fails (see `abbaco-api-rest-controller`).
 - **ETag gotcha**: use the inherited `requestToGETResourceIdentifiedBy:accepting:conditionalTo:` helper. There is no `setIfNoneMatch:` on `ZnRequest`.
 - **Category naming**: `tests - routes`, `tests - creation`, `tests - querying`, `tests - updates`, `tests - deletion`, `tests - lifecycle` (for action endpoints), `tests - content negotiation`.
 
@@ -489,6 +500,19 @@ PaidSubscriptionRESTfulControllerTest >> requestToPOSTAction: actionUrl identifi
     ^ TeaRequest
         fromZnRequest: ( ZnRequest post: actionUrl )
         pathParams: ( self parametersWith: anIdentifier )
+]
+```
+
+The same shape covers a **sub-resource GET with query parameters** (e.g. `…/<id>/metrics?asOf=…`) — the inherited `requestToGETSubresource:identifiedBy:accepting:` takes no query string, so build the request directly and let the controller read the query with `httpRequest at: 'asOf' ifAbsent: […]`:
+
+```smalltalk
+{ #category : 'private - support' }
+ThingMetricsRESTfulControllerTest >> requestToGETMetricsIdentifiedBy: anIdentifier asOf: anIsoDateOrNil [
+
+    | url |
+    url := self baseUrl asString , '/things/' , anIdentifier , '/metrics'.
+    anIsoDateOrNil ifNotNil: [ :asOf | url := url , '?asOf=' , asOf ].
+    ^ TeaRequest fromZnRequest: ( ZnRequest get: url asUrl ) pathParams: ( self parametersWith: anIdentifier )
 ]
 ```
 
@@ -717,6 +741,7 @@ RDBMSPortfolioManagementSystemTest >> testPersistAndQueryRoundTrip [
 ### Rules
 
 - **Subclass the in-memory user-story test** and override `setUpRequirements` (or `repositoryProvider` if the parent uses it). The shared test methods immediately exercise the Postgres mapping.
+- **Add `<RDBMSSubclass> class >> shouldInheritSelectors [ ^ true ]` as soon as the subclass defines *any* of its own test methods.** SUnit inherits a parent's tests only when the subclass has **no** test selectors of its own (or the parent is abstract). Add one mapping-coverage test (`testPersistAndQueryRoundTrip…`) without this override and the subclass **silently stops running the entire inherited suite** — it reports just your new test as green while the real coverage vanishes. With `shouldInheritSelectors ^ true` it runs inherited **plus** own. (Same trap applies to any RDBMS *controller*-test subclass that adds its own tests.)
 - **`setUp` calls `prepareForInitialPersistence`** to recreate the schema. **`tearDown` calls `destroyRepositories`** to drop it.
 - **Add at least one `testPersistAndQueryRoundTrip` per aggregate.** Construct an instance with every mapped field populated, store it, fetch it back by identifier, assert every field. This is the test that catches descriptor-vs-table drift.
 - **Add `testFilterByX` for every indexed column** — exercises `findAllMatching:` with `:criteria | criteria satisfying: …` on real Postgres (Glorp can fail on criteria builders even when in-memory passes).

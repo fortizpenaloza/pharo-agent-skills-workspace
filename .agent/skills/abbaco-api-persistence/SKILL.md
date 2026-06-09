@@ -159,7 +159,15 @@ Wire it on a `DirectMappingDefinition`:
 
 - The conversion `name:` is a free-form label used for diagnostics; pick something descriptive.
 - The two blocks must be inverses: `from-database-to-smalltalk` then `from-smalltalk-to-database` should round-trip, modulo the canonical form chosen for storage.
-- **Handle nil in the conversion blocks** when the column is nullable. A converter that crashes on nil produces `MessageNotUnderstood` deep inside Glorp, with no useful stack. Reference: `SubscriptionRDBMSMappingConfiguration >> expirationDateAllowingNilConversionDefinition` in the abbaco subscription code.
+- **Handle nil in the conversion blocks** when the column is nullable *and you have a converter*. A converter that crashes on nil produces `MessageNotUnderstood` deep inside Glorp, with no useful stack. Reference: `SubscriptionRDBMSMappingConfiguration >> expirationDateAllowingNilConversionDefinition` in the abbaco subscription code.
+- **Don't add a converter you don't need.** A plain nullable numeric/string column needs *no* conversion — a bare `DirectMappingDefinition fromAttributeNamed:toFieldNamed:onTableNamed:` (no `conversionDefinedBy:`) maps `NULL ↔ nil` natively, and `NUMERIC` columns round-trip as `Float`. Reach for a converter only when the in-memory and on-disk representations genuinely differ (symbol↔string, enum object, timestamp normalization).
+- **`platform timestamp` is timezone-less — normalize to UTC on write.** `TimestampFieldDefinition` maps to a `timestamp` column with no zone: Glorp writes the value's wall-clock and reads it back at `+00:00`, so a *local* `DateAndTime` (e.g. `12:00-03:00`) comes back as `12:00+00:00` — a shifted instant, and `=` fails. Convert to UTC going down and pass the read value straight back; `DateAndTime>>=` compares the absolute instant, so equality then holds:
+  ```smalltalk
+  PluggableMappingConversionDefinition
+      named: 'capturedAtConverter'
+      convertingFromDatabaseToSmalltalkUsing: [ :aValue | aValue ]
+      fromSmalltalkToDatabaseUsing: [ :aDateAndTime | aDateAndTime asUTC ]
+  ```
 - For more complex multi-field translations (status + expiration date stored as two columns but mapped as one polymorphic status object), use `AdHocMappingDefinition forAttributeNamed:sending:to:toMapAssociations:`. Reference: `SubscriptionRDBMSMappingConfiguration >> statusMappingDefinition`.
 
 ## 4. Embedded value objects (single-table)
@@ -191,6 +199,30 @@ PortfolioRDBMSMappingConfiguration new cull: portfolios.
 MoneyMappingConfiguration new cull: portfolios.
 ```
 
+### When the wrapper holds the value object in a slot (the abbaco wrapper IS this case)
+
+The `IdentifiedPortfolio` wrapper from `abbaco-api-domain-model` does not have `name` / `owner` as its
+own instVars — it holds the `Portfolio` value object in a `portfolio` slot and delegates accessors. So
+**plain `DirectMappingDefinition fromAttributeNamed: #name` does not apply** (Glorp maps by slot; the
+wrapper has no `name` slot). Map the wrapper with an embedded value instead:
+
+- **The embed attribute must be a `TypedAttributeDefinition`, not `BasicAttributeDefinition`.** In the
+  wrapper's class model declare `TypedAttributeDefinition named: #portfolio typed: Portfolio`; in its
+  descriptor use `EmbeddedValueOneToOneMappingDefinition forAttributeNamed: #portfolio`. With an
+  *untyped* `BasicAttributeDefinition`, Glorp's `EmbeddedValueOneToOneMapping >> mappedFields` finds a
+  nil `referenceDescriptor` and the first `store:` dies with **"receiver of `mappedFields` is nil"**.
+- The embedded `Portfolio` gets its own config (class model + descriptor on the **same** real table,
+  same field names ⇒ plain `EmbeddedValueOneToOneMappingDefinition`, no translation needed). All three
+  classes (`IdentifiedPortfolio`, `Portfolio`, and any nested value object) can live in one config.
+- **Nested embedding works** (wrapper → value object → embedded sub-value, all folded into one table),
+  and an embedded value object **may own relational mappings** (`OneToOneMapping…`,
+  `OneToManyBasic…`) — those are driven from the parent table.
+- **Query embedded fields by navigation, not flattening.** `each owner` on the wrapper raises
+  `no mapping for Base(IdentifiedPortfolio).owner`; you must navigate through the embed attribute:
+  `each portfolio owner`. For that same path to also resolve in-memory, the wrapper must expose the
+  value object via an accessor named like the embed attribute (`IdentifiedPortfolio >> portfolio`).
+  (See the query-portability note under §7 and the conflict-strategy example in §8.)
+
 ## 5. Owned collections
 
 For an aggregate that owns a typed collection (e.g. a portfolio owns positions), declare:
@@ -201,6 +233,29 @@ For an aggregate that owns a typed collection (e.g. a portfolio owns positions),
 - On the parent's descriptor, a `OneToManyTypedAttributeMappingDefinition forAttributeNamed: #positions …` linking the parent's primary key to the child's foreign key.
 
 The parent's `synchronizeWith:` is responsible for replacing/merging the collection; Sagan persists the change inside the surrounding `transact:`.
+
+### Collection of scalars (`OneToManyBasic`) needs a position column
+
+For a collection of plain values (strings, numbers) use `OneToManyBasicAttributeMappingDefinition
+forAttributeNamed: #urls obtainingValuesFrom: 'url' andPositionFrom: 'position' on: <childTable>
+translatingUsingAll: { <parent-PK ↔ child-FK `TableFieldTranslationDefinition`> }`. It calls
+`writeTheOrderField`, so **the child table must carry an ordering column** (`position` INTEGER) even
+when order is not business-significant — omit it and storing fails. Declare the attribute in the class
+model as `TypedCollectionAttributeDefinition named: #urls typed: String inCollectionOfType:
+OrderedCollection`. Read-back collections come back as Glorp lazy `Proxy`s that forward collection
+protocol (`asArray`, `do:`, `asSet`).
+
+### No DB foreign key when the parent can be purged while children survive
+
+A `ForeignKeyFieldDefinition` emits a real DB FK constraint. If the referenced parent can be **deleted
+while its children must survive** (append-only history with a deliberately dangling reference), that
+constraint blocks the delete (`update or delete on table "…" violates foreign key constraint`). In that
+case make the FK column a plain `IntegerFieldDefinition` and define the reference's join **explicitly**
+with `OneToOneMappingWithTranslationDefinition forAttributeNamed: #parent translatingFieldsUsingAll: {
+TableFieldTranslationDefinition translatingFieldNamed: 'parent_sequential_number' onTableNamed:
+<childTable> toFieldNamed: <parent PK> onTableNamed: <parentTable> }` — Glorp still hydrates the
+reference, but nothing at the DB level forbids the dangling row. Reserve real `ForeignKeyFieldDefinition`s
+for parents that are never purged.
 
 
 ## 6. The `RDBMSRepositoryProvider` and the `RepositoryProviderSystem`
@@ -331,6 +386,52 @@ Once the mapping is applied, the management system uses the repository directly.
 portfolios update: original executing: [ :stored | stored synchronizeWith: updated ]
 ```
 
+### Query criteria — in-memory vs RDBMS portability (write the RDBMS-safe form from the start)
+
+This is the single most common way working code passes in-memory tests and then explodes against
+Postgres. Sagan turns a filter/sort block into criteria with
+`aBlock cull: candidate cull: aRepository matchingCriteriaBuilder` (`BlockClosure>>asMatchingCriteriaIn:`):
+
+- **in-memory**, `candidate` is the **real domain object**;
+- **against RDBMS**, `candidate` is a **Glorp expression builder** (it builds SQL).
+
+A **1-arg** block `[ :each | … ]` receives only the candidate; a **2-arg** block `[ :each :criteria | … ]`
+also receives the criteria builder. Three constructs work in memory but **fail against RDBMS** — so write
+every `findAllMatching:` / `withOneMatching:…` filter and sort in the portable 2-arg form *from the start*,
+and your one set of management-system query methods runs unchanged in both:
+
+| In-memory (works) but RDBMS-broken | Symptom against RDBMS | Portable form |
+|---|---|---|
+| `[ :each | a and: [ b ] ]` / `or:` | `mustBeBoolean` ("optimized message … inside a Glorp expression block") | `[ :each :criteria | criteria satisfying: a and: [ b ] ]` (or `criteria satisfyingAll: { … }`) |
+| `each portfolio identifier` (a *derived* method — `identifier ^ uuid asString`, not a mapped attribute) | `no mapping for Base(IdentifiedPortfolio).identifier` | compare whole entities with `criteria does: each portfolio equal: anEntity` (matches on `sequentialNumber`); reach scalars only through **mapped attributes** |
+| `sortedBy: [ :a :b | a date > b date ]` (2-arg comparator) | silently sorts in memory; never an SQL `ORDER BY` | property sort: `sortedBy: #date descending` (Symbol) or `sortedBy: [ :each | each date ] descending` (1-arg) |
+
+```smalltalk
+"❌ in-memory only"
+withCurrentOf: aPortfolio do: foundBlock else: noneBlock
+    ^ positions
+        withOneMatching: [ :each | each portfolio identifier = aPortfolio identifier
+                                    and: [ each effectiveFrom <= Date today ] ]
+        sortedBy: [ :a :b | a effectiveFrom > b effectiveFrom ]
+        do: foundBlock else: noneBlock
+
+"✅ portable (same code in-memory and against RDBMS)"
+withCurrentOf: aPortfolio do: foundBlock else: noneBlock
+    ^ positions
+        withOneMatching: [ :each :criteria |
+            criteria
+                satisfying: ( criteria does: each portfolio equal: aPortfolio )
+                and: [ each effectiveFrom <= Date today ] ]
+        sortedBy: [ :each | each effectiveFrom ] descending
+        do: foundBlock else: noneBlock
+```
+
+`InMemoryRepositoryMatchingCriteriaBuilder` and `RDBMSRepositoryMatchingCriteriaBuilder` implement the
+same protocol (`does:equal:`, `satisfying:and:`, `satisfyingAll:`, `is:includedIn:`, …) — lean on it
+rather than raw Smalltalk control flow. A single comparison on a **directly mapped** scalar attribute
+(`[ :each | each owner = aUrl ]`) is fine 1-arg, because Glorp overrides `=` for expressions; it's the
+`and:`/`or:`, derived-method navigation, and comparator sorts that need the builder.
+
 ## 8. Conflict-checking strategies
 
 Pass one to `createRepositoryStoringObjectsOfType:checkingConflictsAccordingTo:` (or the Sagan-Kepler equivalent `createRepositoryFor:storingObjectsOfType:checkingConflictsAccordingTo:`):
@@ -339,10 +440,26 @@ Pass one to `createRepositoryStoringObjectsOfType:checkingConflictsAccordingTo:`
 |---|---|
 | `DoNotCheckForConflictsStrategy new` | The aggregate has no application-level uniqueness constraint (e.g. historical records, append-only logs). Most common for status-driven entities where the status itself encodes the uniqueness. |
 | `CriteriaBasedConflictCheckingStrategy forSingleAspectMatching: <selectorOrBlock>` | A single attribute is unique (e.g. `#name`). The argument is a unary symbol or a 1-arg block that extracts the aspect. |
-| `CriteriaBasedConflictCheckingStrategy forSingleAspectMatching: [ :p | p owner -> p name ]` | Compound uniqueness. Return an `Association` or `Array` from the block; Sagan compares them for equality. |
+| `CriteriaBasedConflictCheckingStrategy forSingleAspectMatching: [ :p | p owner -> p name ]` | Compound uniqueness — **in-memory only; broken against RDBMS** (see below). Returns an `Association`; Sagan compares by equality, which Glorp can't render to SQL. |
 | `CriteriaBasedConflictCheckingStrategy forSingleAspectMatching: <…> explainingConflictWith: <stringBlock>` | Same as above but customizes the conflict-error message. The block receives the conflicting object. The message is plain English (no localization). |
 
 The conflict check runs inside `store:` and `update:executing:` — it raises `ConflictingObjectFound` before the SQL hits the database.
+
+### Compound uniqueness against RDBMS — use `accordingTo:`, not the Association form
+
+The conflict check executes a **read** inside `store:`. The single-aspect form (one unary selector, e.g. `forSingleAspectMatching: #name`) renders fine. But the **compound** `forSingleAspectMatching: [ :p | p owner -> p name ]` builds an `Association`-equality criteria that the in-memory repository evaluates happily and the RDBMS repository **cannot** translate — it fails with `GlorpDatabaseReadError: Invalid data type` the first time you `store:`. For compound uniqueness, drive the criteria builder explicitly with `accordingTo:explainingConflictWith:` (the block gets `objectInRepository`, the `criteria` builder, and the candidate). This works in **both** repositories:
+
+```smalltalk
+CriteriaBasedConflictCheckingStrategy
+    accordingTo: [ :each :criteria :aPortfolio |
+        criteria
+            satisfying: ( each owner = aPortfolio owner )
+            and: [ each name = aPortfolio name ] ]
+    explainingConflictWith: [ :aPortfolio |
+        'There is already a portfolio named "' , aPortfolio name , '" owned by ' , aPortfolio owner ]
+```
+
+The same in-memory-vs-RDBMS rule governs every `findAllMatching:` / `withOneMatching:` filter — see "Query criteria" under §7.
 
 ## 9. SQL migrations live outside Sagan
 
@@ -382,8 +499,12 @@ SQL
 - **Conversion blocks that crash on nil** — use `value ifNotNil: [ … ]` in both directions whenever the column is `nullableNamed:`. Reference the abbaco `expirationDateAllowingNilConversionDefinition` for the canonical pattern.
 - **Running `prepareForInitialPersistence` in production** — drops every table. Gate it behind `RDBMS_CREATE_EMPTY_DATABASE` or equivalent, and never enable that in production environments.
 - **Calling `RDBMSRepositoryProvider` directly inside the management system** — couples persistence choice to domain code. Always go through `RepositoryProviderSystem >> #mainDB` so the same management system code runs against `InMemoryRepositoryProvider` in tests and `RDBMSRepositoryProvider` in production.
-- **Applying the mapping configuration once at module-install time** — Kepler restarts can recreate repositories. Apply the mapping inside `startUpWhenStopped` immediately after `createRepositoryFor:…` (see `abbaco-api-domain-model`).
+- **Applying the mapping configuration once at module-install time** — Kepler restarts can recreate repositories. Apply the mapping inside `startUpWhenStopped` immediately after `createRepositoryFor:…` (see `abbaco-api-domain-model`). `InMemoryRepository >> configureWith:` is a **no-op**, so the unconditional `<Thing>RDBMSMappingConfiguration new cull: repository` line is harmless in tests and the *same* system code serves both providers — never guard it behind a provider-type check.
 - **Indexing nothing** — small tables work, large tables grind. Index every column used in a `withOneWhere:is:` or `findAllMatching:` filter expression, plus the foreign-key column on every owned-collection child table.
 - **Using `repository configureMappingsIn: aConfig`** — this selector exists in older abbaco code (subscription-api), but the canonical Sagan API is `aConfig new cull: repository`. The configuration is `cull:`-applicable; treat it as a callable.
 - **Writing a single mega-configuration for an entire API** — split per aggregate root. Each `<Thing>RDBMSMappingConfiguration` describes exactly one aggregate; the application or management system applies several to the same repository as needed.
 - **Forgetting to add a migration script when changing a mapping** — production schema diverges from the mapping silently until a query fails. Pair every mapping change with a `migrations/<name>/step*.sh`.
+- **`BasicAttributeDefinition` for an embedded/relational attribute** — embed and one-to-one/one-to-many attributes need `TypedAttributeDefinition named: … typed: <Class>` (and `TypedCollectionAttributeDefinition` for basic collections) so Glorp knows the reference class. An untyped `BasicAttributeDefinition` produces "receiver of `mappedFields` is nil" on `store:`.
+- **Compound conflict uniqueness via the `forSingleAspectMatching: [ :p | a -> b ]` Association form** — works in-memory, fails against RDBMS with `GlorpDatabaseReadError: Invalid data type`. Use `accordingTo:explainingConflictWith:` with the criteria builder (§8).
+- **`and:`/`or:` or comparator-block sorts in a repository query block** — render against RDBMS as `mustBeBoolean` / silent in-memory sort. Use the 2-arg criteria-builder form and property sorts (§7).
+- **A persisted value object without value `=` / `hash`** — a read-back is a *new* instance, so round-trip equality assertions and set membership fail unless the value object defines `=`/`hash` by value (see `smalltalk-conventions`).
