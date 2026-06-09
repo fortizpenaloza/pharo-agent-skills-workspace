@@ -272,3 +272,6 @@ Before exporting a package to git, run a reformat pass on all classes touched in
 | "Linefeed" errors | Missing `withInternalLineEndings` | Append `withInternalLineEndings` to the source string |
 | CRLF characters appear in exported Tonel | Source string submitted with `\r\n` | Resubmit using LF-only (`\n`) line endings |
 | Method body indentation differs from Tonel output | Wrong indent width or tabs in source | Use 2-space indentation; run a reformat pass before export |
+| `Variable or expression expected` from `eval` | A temp-var declaration `\| x \|` placed *after* a statement | Temp-var declarations must be the **first** tokens of an eval. Move them to the top, or split into separate evals |
+| `Undeclared variable <NewClass>` when one eval both *creates* a class and references it by name | The whole eval is compiled **before** it runs, so the just-created global isn't visible yet | Split it: install the class in **one** eval; compile its methods (which reference the new global) in a **separate** eval |
+| `doesNotUnderstand: #on:do:on:do:` | Chained multi-exception handler on a block | `on:do:on:do:` is not a block selector — nest `on:do:`, or catch a union with `on: ExcA, ExcB do:` |
