@@ -412,6 +412,28 @@ Bug found? Write failing test reproducing it. Follow TDD cycle. Test proves fix 
 
 Never fix bugs without a test.
 
+## Reusing a Test Suite Across Configurations (and the `shouldInheritSelectors` trap)
+
+When the same behavior must hold under a swapped collaborator — an in-memory double vs. a real backend, one platform vs. another, a stubbed clock vs. the system clock — do **not** duplicate the test methods. Write the suite once against the cheap configuration, then **subclass it and override only the fixture**. The inherited test methods re-run unchanged against the new configuration.
+
+```smalltalk
+InMemoryFooTest >> repositoryProvider  ^ InMemoryRepositoryProvider new    "parent: fast, no I/O"
+
+RDBMSFooTest >> repositoryProvider      ^ RDBMSRepositoryProvider using: …  "child: same tests, real DB"
+```
+
+**The SUnit trap that makes this silently lose coverage:** SUnit runs a class's *inherited* test methods **only when that class defines none of its own**. The moment the subclass adds even one test method of its own (a configuration-specific extra), SUnit stops inheriting the parent's suite — the subclass then reports just its own test as green while the **entire inherited suite silently stops running**. Guard with:
+
+```smalltalk
+RDBMSFooTest class >> shouldInheritSelectors  ^ true
+```
+
+Add it the moment a reuse-subclass defines any test of its own; the subclass then runs inherited **plus** its own. (The abbaco PostgreSQL integration layer is exactly this pattern — see `abbaco-api-persistence`.)
+
+## Keep One Test That Exercises the Real Composition
+
+A suite that **always wires its collaborators by hand** — stubs, in-memory doubles, subsystems registered directly in `setUp` — never exercises how the pieces are actually assembled in production. Wiring and bootstrap bugs then ship green: a mis-spelled reflective registration selector, a dependency that's never installed, a behavior that only differs against the real backend. Unit speed is worth it for the bulk of the suite, but **keep at least one test that boots the real composition end-to-end** (the real installer / application wiring, the real backend). It is the only test that can catch those bugs, and it routinely catches them after every hand-wired test passed. (See `abbaco-api-persistence` for the install-path integration test that makes this concrete.)
+
 ## Testing Anti-Patterns
 
 When adding mocks or test utilities, review the testing anti-patterns below to avoid common pitfalls:

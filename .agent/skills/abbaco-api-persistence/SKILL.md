@@ -262,93 +262,20 @@ for parents that are never purged.
 
 The provider knows the database connection. The provider system (Kepler subsystem) maps a logical name (`#mainDB`) to a provider instance, so the management system never sees connection details.
 
-### In production (StargateApplication wiring)
+### In production — the skeleton's Postgres provider module
 
-The application class:
-1. Reads PostgreSQL connection parameters from `MandatoryConfigurationParameter`s.
-2. Builds a Glorp `Login`.
-3. Constructs `RDBMSRepositoryProvider using: login` (single session) or `RDBMSRepositoryProvider usingSessionPoolWith: login configuredBy: …` (pooled — preferred for production).
-4. Creates a `CompositeSystem` and registers a custom module that installs the `RepositoryProviderSystem` with the RDBMS provider under `#mainDB`, plus every `<Thing>ManagementModule`.
-5. Calls `( rootSystem >> #RepositoryProviderSystem ) prepareForInitialPersistence` once at startup if `RDBMS_CREATE_EMPTY_DATABASE` is true (development / fresh deploys only).
+**Do not hand-roll an `RDBMSRepositoryProviderModule`.** The Mercap Persistent-API-Skeleton ships `SinglePostgreSQLDatabaseProviderModuleFactory`, which *is* a module — its `toInstallOn:` builds a `SingleDatabaseRepositoryProviderModule` (itself a `SystemModule`) that registers `RepositoryProviderSystem` under `#mainDB` over a pooled PostgreSQL `Login`. List it in the service's `SystemInstallation >> modulesToInstall`:
 
 ```smalltalk
-Login new
-    database: PostgreSQLPlatform new;
-    username: self configuration sagan pgUsername;
-    password: self configuration sagan pgPassword;
-    host: self configuration sagan pgHostname;
-    port: self configuration sagan pgPort;
-    databaseName: self configuration sagan pgDatabaseName;
-    setSSL;
-    yourself
+<Thing>SystemInstallation >> modulesToInstall
+    ^ Array
+        with: ( SinglePostgreSQLDatabaseProviderModuleFactory configuredBy: application saganConfiguration )
+        with: <Thing>SystemModule
+        with: <OtherSystemModule>
 ```
 
-For pooled connections:
-
-```smalltalk
-RDBMSRepositoryProvider usingSessionPoolWith: login configuredBy: [ :options |
-    options at: #maxIdleSessionsCount put: 10.
-    options at: #minIdleSessionsCount put: 5.
-    options at: #maxActiveSessionsCount put: 12 ]
-```
-
-(The connection-retry options `maximumConnectionAttempts` and `timeSlotBetweenConnectionRetriesInMs` apply to both pooled and single-session providers.)
-
-### Custom RDBMS provider module
-
-Sagan-Kepler ships only `InMemoryRepositoryProviderModule`. For production, write a small per-API module:
-
-```smalltalk
-Class {
-    #name : 'RDBMSRepositoryProviderModule',
-    #superclass : 'SystemModule',
-    #instVars : [ 'rootSystem', 'login', 'sessionPoolConfiguration' ],
-    #category : 'Portfolio-API-Model',
-    #package : 'Portfolio-API-Model'
-}
-
-{ #category : 'instance creation' }
-RDBMSRepositoryProviderModule class >> toInstallOn: aCompositeSystem connectingWith: aLogin configuredBy: aPoolConfigurationBlock [
-
-    ^ self new initializeToInstallOn: aCompositeSystem connectingWith: aLogin configuredBy: aPoolConfigurationBlock
-]
-
-{ #category : 'initialization' }
-RDBMSRepositoryProviderModule >> initializeToInstallOn: aCompositeSystem connectingWith: aLogin configuredBy: aPoolConfigurationBlock [
-
-    rootSystem := aCompositeSystem.
-    login := aLogin.
-    sessionPoolConfiguration := aPoolConfigurationBlock
-]
-
-{ #category : 'private' }
-RDBMSRepositoryProviderModule >> rootSystem [ ^ rootSystem ]
-
-{ #category : 'private' }
-RDBMSRepositoryProviderModule >> name [ ^ 'RDBMS Repository Provider' ]
-
-{ #category : 'private' }
-RDBMSRepositoryProviderModule >> systemInterfacesToInstall [
-
-    ^ #( #RepositoryProviderSystem )
-]
-
-{ #category : 'private' }
-RDBMSRepositoryProviderModule >> registerRepositoryProviderSystemForInstallationIn: systems [
-
-    ^ self
-        register: [
-            RepositoryProviderSystem new
-                register: ( RDBMSRepositoryProvider
-                    usingSessionPoolWith: login
-                    configuredBy: sessionPoolConfiguration )
-                as: #mainDB;
-                yourself ]
-        in: systems
-]
-```
-
-In tests, swap this for `InMemoryRepositoryProviderModule` (which Sagan-Kepler ships ready-to-use). The management system code is identical — it always asks `RepositoryProviderSystem` for `#mainDB`.
+- **Use `configuredBy:`** (passing the Sagan configuration object), **not** the deprecated `configuredBy:withPoolingOptions:`. The factory reads `pgHostname` / `pgPort` / `pgUsername` / `pgPassword` / `pgDatabaseName` (and `setSSL`) and the pooling/retry limits (`Min/Max Idle Sessions Count`, `Max Active Sessions Count`, `Maximum Connection Attempts`, …) **from the Sagan configuration parameters** — they are declared via `SaganParameterDefinitionProvider saganConfigurationParametersForPostgreSQL`, not a code-level options block. The full application/installation wiring lives in `abbaco-api-house-style` (Application, installation, and baseline wiring).
+- **In tests**, register `InMemoryRepositoryProvider new as: #mainDB` on a `RepositoryProviderSystem` directly (no factory). The management-system code is identical across both — it always asks `RepositoryProviderSystem` for `#mainDB`.
 
 ### Schema lifecycle
 
@@ -359,7 +286,7 @@ In tests, swap this for `InMemoryRepositoryProviderModule` (which Sagan-Kepler s
 | Drop everything (tests) | `( rootSystem >> #RepositoryProviderSystem ) destroyRepositories` | Drops all tables. Use only in test `tearDown`. |
 | Reset cached sessions | `provider reset` | Clears connection cache without dropping tables. |
 
-The boolean environment variable `RDBMS_CREATE_EMPTY_DATABASE` (used by abbaco docker-compose stacks) is a convention for "call `prepareForInitialPersistence` at startup if true." Wire that yourself on the application — it is not built into Stargate or Sagan.
+**Schema creation is not a flag on the API app.** The `<Thing>EmptyRDBMSApplication` (a `CreateEmptyRDBMSApplication` subclass — see `abbaco-api-house-style`) is a separate runnable container that installs through the shared `SystemInstallation`, calls `prepareForInitialPersistence`, and exits. The deploy pipeline runs it **before** the API container; that *is* "create the empty database on first deploy." There is no `RDBMS_CREATE_EMPTY_DATABASE` boolean checked at API startup in the current stack (older abbaco docker-compose stacks used one; the empty-RDBMS app replaces it). In tests, the PostgreSQL integration layer calls `prepareForInitialPersistence` in `setUp` and `destroyRepositories` in `tearDown` directly (next section).
 
 ## 7. Repository CRUD surface
 
@@ -386,6 +313,25 @@ Once the mapping is applied, the management system uses the repository directly.
 portfolios update: original executing: [ :stored | stored synchronizeWith: updated ]
 ```
 
+### `update:executing:` mutates a re-materialized copy on RDBMS — not the object you passed in
+
+The two providers differ in a way that is invisible in-memory and only bites against Postgres:
+
+- **In-memory**, `update: anObject executing: aBlock` runs `aBlock value: anObject` — the block mutates **the very object you passed in**.
+- **Against RDBMS**, it runs (paraphrased) `refreshed := session refresh: anObject. session modify: refreshed in: [ aBlock value: refreshed ]` — the block mutates a **freshly re-materialized copy**, and the object you passed in is **left untouched**.
+
+So **the authoritative post-update object is the *return value* of `update:executing:`** (the synced object in both providers), not the argument you handed it. If a management-system method updates and then hands back an object the caller reads (a controller encoding the PATCH `200 OK` body, say), return what `update:executing:` gave you — or, if the method's shape forces it to return an object it already holds (e.g. it does several writes in one `transact:` and returns the aggregate), `synchronizeWith:` that in-hand object explicitly too:
+
+```smalltalk
+"In-hand object must reflect the change for the caller — sync it explicitly,
+ because on RDBMS the executing-block mutated a copy, not aPortfolio."
+synchronizePortfolio: aPortfolio with: updated
+    aPortfolio name = updated name ifTrue: [ ^ self ].
+    portfolios update: aPortfolio executing: [ :stored | stored synchronizeWith: updated ].
+    aPortfolio synchronizeWith: updated   "no-op in-memory (same instance); corrective on RDBMS"
+```
+
+Assuming the passed object now reflects the change passes every in-memory test and serves a **stale** representation against Postgres. **A mapping round-trip test that re-fetches by identifier will not catch it** — it reads the (correct) DB row, never the stale in-hand object. The test that catches it asserts on what the update path *returns or encodes* — e.g. a controller HTTP round-trip against Postgres (see §10.2).
 ### Query criteria — in-memory vs RDBMS portability (write the RDBMS-safe form from the start)
 
 This is the single most common way working code passes in-memory tests and then explodes against
@@ -489,15 +435,72 @@ SQL
 ```
 
 
-**The mapping configuration must always describe the post-migration schema.** When you change a table, change the `<Thing>RDBMSMappingConfiguration` in the same PR and add a migration script. CI integration tests (see `abbaco-api-testing`) catch drift by exercising the persist-query round-trip on a freshly recreated schema.
+**The mapping configuration must always describe the post-migration schema.** When you change a table, change the `<Thing>RDBMSMappingConfiguration` in the same PR and add a migration script. CI integration tests (see `abbaco-api-integration-tests`) catch drift by exercising the persist-query round-trip on a freshly recreated schema.
 
-## 10. Common mistakes
+## 10. PostgreSQL integration tests (`<Thing>-API-Model-Tests`)
+
+Every layer above runs against `InMemoryRepositoryProvider`. The mapping is only *proven* against real Postgres. Two integration tests earn their keep — both connect with parameters from environment variables (`OSEnvironment current at: 'PG_HOSTNAME' ifAbsent: [ 'localhost' ]`, port `PG_PORT`) so the same test runs locally and against the CI sidecar (see `abbaco-api-integration-tests`).
+
+### 10.1 Management-system RDBMS round-trip
+
+Subclass the in-memory domain user-story test (`abbaco-api-domain-model` §5.2), swap in the RDBMS provider, recreate the schema around each test:
+
+```smalltalk
+Class { #name : 'RDBMSPortfolioSystemTest', #superclass : 'PortfolioSystemUserStoryTest',
+        #category : 'Portfolio-API-Model-Tests', #package : 'Portfolio-API-Model-Tests' }
+
+RDBMSPortfolioSystemTest class >> shouldInheritSelectors  ^ true   "← reuse-subclass: see TDD"
+
+RDBMSPortfolioSystemTest >> repositoryProvider
+    ^ RDBMSRepositoryProvider using:
+        ( SinglePostgreSQLDatabaseProviderModuleFactory configuredBy: self saganConfiguration ) databaseLogin
+
+RDBMSPortfolioSystemTest >> setUp
+    super setUp.
+    ( rootSystem >> #RepositoryProviderSystem ) prepareForInitialPersistence
+
+RDBMSPortfolioSystemTest >> tearDown
+    ( rootSystem >> #RepositoryProviderSystem ) destroyRepositories.
+    super tearDown
+
+RDBMSPortfolioSystemTest >> testPersistAndQueryRoundTrip
+    | identified found |
+    identified := self systemUnderTest startManagingPortfolio:
+        ( Portfolio named: 'Long-term' describedAs: 'Buy and hold' withImage: 'http://x' ownedBy: 'user-1' ).
+    found := self systemUnderTest portfolioIdentifiedBy: identified identifier.
+    self assert: found name equals: 'Long-term'; assert: found owner equals: 'user-1'
+```
+
+Rules:
+- **`shouldInheritSelectors ^ true` is mandatory** — this layer is a reuse-subclass (it swaps the provider and adds its own tests), so without the override SUnit silently stops running the inherited suite. See `test-driven-development` (Reusing a Test Suite Across Configurations) for the general rule and the trap.
+- `setUp` → `prepareForInitialPersistence`; `tearDown` → `destroyRepositories`. Always.
+- **One `testPersistAndQueryRoundTrip` per aggregate** — construct with every mapped field populated, store, fetch by identifier, assert every field. This is the test that catches descriptor↔table drift (a renamed instVar, a wrong column, a broken conversion).
+- **`testFilterByX` for every indexed column** — exercises `findAllMatching:` with the criteria builder on real Postgres (Glorp fails on criteria that pass in-memory — §7/§8).
+- **Status-driven entities**: store with status A, update to B, requery, assert the conversion both ways.
+
+### 10.2 Full-stack integration through the real install path
+
+Boot the composite system through the **real `SystemInstallation install:`** (the same seam the application uses — see `abbaco-api-house-style`), start an HTTP API over it, recreate the schema, and drive a full round-trip against Postgres:
+
+```smalltalk
+<Thing>PostgresIntegrationTest >> buildRootSystem
+    ^ ( <Thing>SystemInstallation installedBy: self ) install: 'integration-test'
+```
+
+This is the **only** test that exercises Kepler's module-registration reflection and the production request path, so it catches two whole classes of bug that every hand-wired test ships green:
+
+- A mis-spelled `register…SystemForInstallationIn:` module selector — boot fails with `SystemControlError: System implementing "…" not found` (see `abbaco-api-domain-model` §4).
+- A stale-in-hand-object PATCH `200 OK` body from `update:executing:`'s RDBMS copy semantics (§7) — a re-fetch-by-identifier mapping test reads the correct DB row and never sees it; only an assertion on what the controller **encodes** catches it.
+
+For the real-HTTP client idiom (the enforcing `ZnClient`, catching `ZnHttpUnsuccessful`) used to drive this round-trip, see `abbaco-api-rest` (API user-story tests).
+
+## 11. Common mistakes
 
 - **Mismatched table names across the three declarations** — `'PORTFOLIO'` in the table, `'PORTFOLIOS'` in the descriptor, `'portfolio'` in a mapping. Sagan reports the failure as `descriptor not found for class IdentifiedPortfolio` at first query. Always go through a single accessor (`portfolioTableName`).
 - **Forgetting `SequentialNumberMappingDefinition`** — `store:` works but the wrapper's `sequentialNumber` slot stays nil and subsequent `update:` calls fail to locate the row. Always pair the field definition with the mapping definition.
 - **Mapping the value object instead of the wrapper** — descriptors must point at the class Sagan stores. The wrapper carries `sequentialNumber` and `uuid`; the value object does not.
 - **Conversion blocks that crash on nil** — use `value ifNotNil: [ … ]` in both directions whenever the column is `nullableNamed:`. Reference the abbaco `expirationDateAllowingNilConversionDefinition` for the canonical pattern.
-- **Running `prepareForInitialPersistence` in production** — drops every table. Gate it behind `RDBMS_CREATE_EMPTY_DATABASE` or equivalent, and never enable that in production environments.
+- **Running `prepareForInitialPersistence` from the API application** — it drops every table. Schema creation belongs to the separate `<Thing>EmptyRDBMSApplication` bootstrap container, run once before the API container (§6, and `abbaco-api-house-style`); the API app never calls it.
 - **Calling `RDBMSRepositoryProvider` directly inside the management system** — couples persistence choice to domain code. Always go through `RepositoryProviderSystem >> #mainDB` so the same management system code runs against `InMemoryRepositoryProvider` in tests and `RDBMSRepositoryProvider` in production.
 - **Applying the mapping configuration once at module-install time** — Kepler restarts can recreate repositories. Apply the mapping inside `startUpWhenStopped` immediately after `createRepositoryFor:…` (see `abbaco-api-domain-model`). `InMemoryRepository >> configureWith:` is a **no-op**, so the unconditional `<Thing>RDBMSMappingConfiguration new cull: repository` line is harmless in tests and the *same* system code serves both providers — never guard it behind a provider-type check.
 - **Indexing nothing** — small tables work, large tables grind. Index every column used in a `withOneWhere:is:` or `findAllMatching:` filter expression, plus the foreign-key column on every owned-collection child table.
@@ -508,3 +511,4 @@ SQL
 - **Compound conflict uniqueness via the `forSingleAspectMatching: [ :p | a -> b ]` Association form** — works in-memory, fails against RDBMS with `GlorpDatabaseReadError: Invalid data type`. Use `accordingTo:explainingConflictWith:` with the criteria builder (§8).
 - **`and:`/`or:` or comparator-block sorts in a repository query block** — render against RDBMS as `mustBeBoolean` / silent in-memory sort. Use the 2-arg criteria-builder form and property sorts (§7).
 - **A persisted value object without value `=` / `hash`** — a read-back is a *new* instance, so round-trip equality assertions and set membership fail unless the value object defines `=`/`hash` by value (see `smalltalk-conventions`).
+- **Returning the object you passed to `update:executing:` and assuming it reflects the change** — true in-memory (same instance), false against RDBMS (the block mutates a refreshed copy; the passed object is untouched). Use the **return value** of `update:executing:`, or `synchronizeWith:` the in-hand object explicitly. Invisible to re-fetch-by-identifier mapping tests; only an assertion on what the update path returns/encodes catches it. See §7.

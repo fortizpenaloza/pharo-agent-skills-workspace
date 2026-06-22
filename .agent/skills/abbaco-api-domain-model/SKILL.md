@@ -493,7 +493,16 @@ PortfolioManagementModule >> registerPortfolioManagementSystemForInstallationIn:
 ]
 ```
 
-One `register<Interface>ForInstallationIn:` method per interface symbol in `systemInterfacesToInstall`. Kepler discovers them by selector convention, so the spelling must match exactly.
+One registration method per interface symbol in `systemInterfacesToInstall`. **Kepler discovers them reflectively, and the matching rule is exact and easy to get subtly wrong:**
+
+> **The selector must begin with `register` and end with `SystemForInstallationIn:`.** `SystemModule >> withSystemsToInstallDo:` collects methods with `KeywordMessageSendingCollector sendingAllMessagesBeginningWith: 'register' andEndingWith: 'SystemForInstallationIn:'`. The text *between* those anchors is free — it's there for readability — but the `SystemForInstallationIn:` ending is mandatory. The method returns the **unstarted** system instance.
+
+Name the method after the **system class** (which ends in `System`), never after the interface symbol:
+
+- System `PortfolioManagementSystem` → `registerPortfolioManagementSystemForInstallationIn:` ✅ — ends in `SystemForInstallationIn:`. Here the interface symbol *is* the system name, so deriving from either works **by luck**.
+- When the Kepler interface symbol is `#<Thing>SystemInterface` (ends in `Interface`, not `System`), still name the selector after the system class: `register<Thing>SystemForInstallationIn:`. Deriving it from the interface symbol gives `register<Thing>SystemInterfaceForInstallationIn:`, which ends in `InterfaceForInstallationIn:` — the collector silently skips it, the module registers **nothing**, and boot later fails with `SystemControlError: System implementing "<name>" not found`.
+
+> **This failure is invisible to the unit/user-story/controller test suites.** `SystemBasedUserStoryTest` and `SingleResourceRESTfulControllerTest` register subsystems **directly** (`registerSubsystem:` / `register:` on a `CompositeSystem`), never through module reflection — so a mis-spelled registration selector ships green. The reflective path runs only when something installs through a `SystemInstallation` / application boot. Keep at least one test that exercises that real install path (see `abbaco-api-persistence` §10.2).
 
 If the management system needs construction parameters (e.g. `SubscriptionsSystem startingTrialValidFor: aTimePeriod`), pass them inside the registration block:
 
@@ -501,7 +510,100 @@ If the management system needs construction parameters (e.g. `SubscriptionsSyste
 register: [ SubscriptionsSystem startingTrialValidFor: ( TimeUnits day with: 7 ) ] in: systems
 ```
 
-## 5. Common mistakes
+## 5. Testing the domain model (`<Thing>-Model-Tests`)
+
+Two layers live with the model: pure unit tests over the value objects, and user-story tests over the system with an in-memory repository. (The controller, HTTP, and PostgreSQL-integration layers live in `abbaco-api-rest` and `abbaco-api-persistence`; the out-of-image Newman/CI layer in `abbaco-api-integration-tests`. The shared SUnit conventions — `assert:equals:`, domain-specific fixture names, `assertCollection:hasSameElements:` — are in `smalltalk-conventions`.)
+
+### 5.1 Domain unit tests (`<Thing>Test` extends `TestCase`)
+
+Cover **domain rules only** — factories, preconditions, value-object behaviour, `synchronizeWith:`, value `=`/`hash`. Do **not** write type-rejection tests (the model layer asserts business rules, not types).
+
+```smalltalk
+Class { #name : 'PortfolioTest', #superclass : 'TestCase',
+        #category : 'Portfolio-Model-Tests', #package : 'Portfolio-Model-Tests' }
+
+{ #category : 'tests' }
+PortfolioTest >> testCreation [
+
+    | portfolio |
+    portfolio := Portfolio named: 'Long-term holdings' describedAs: 'Buy and hold equities'
+        withImage: 'https://example.test/portfolio.png' ownedBy: 'user-123'.
+    self
+        assert: portfolio name equals: 'Long-term holdings';
+        assert: portfolio description equals: 'Buy and hold equities';
+        assert: portfolio owner equals: 'user-123'
+]
+
+{ #category : 'tests' }
+PortfolioTest >> testCreationWithEmptyNameNotAllowed [
+
+    self
+        should: [ Portfolio named: '' describedAs: 'desc' withImage: 'https://x.test' ownedBy: 'u' ]
+        raise: InstanceCreationFailed
+        withMessageText: 'The portfolio name must be a non-empty string of at most 40 characters'
+]
+
+{ #category : 'tests' }
+PortfolioTest >> testSynchronize [
+
+    | original updated |
+    original := Portfolio named: 'A' describedAs: 'a' withImage: 'http://x' ownedBy: 'u'.
+    updated := Portfolio named: 'B' describedAs: 'b' withImage: 'http://y' ownedBy: 'u'.
+    original synchronizeWith: updated.
+    self
+        assert: original name equals: 'B';
+        assert: original description equals: 'b';
+        assert: original owner equals: 'u'   "owner is identity, never changes"
+]
+```
+
+Conventions: one test per behaviour, category `tests`; assert **both** happy and failure path for every factory with `should:raise:withMessageText:` (locks the exact English message — there is no localization layer); **no mocks/stubs** (construct domain objects directly); **cover `synchronizeWith:`** for every value object (it's how `update:executing:` mutates state — a missing field is silent data loss); and for any value object that gets persisted, test value `=`/`hash` (a DB read-back is a *new* instance — see `abbaco-api-persistence`).
+
+### 5.2 Domain user-story tests (`<Thing>SystemUserStoryTest` extends `SystemBasedUserStoryTest`)
+
+`SystemBasedUserStoryTest` (Kepler-SUnit) installs the requested subsystems, calls `startUp`, and exposes `systemUnderTest` (the first interface in `systemInterfacesToInstall`). Wire the repository provider in `setUpRequirements` — `InMemoryRepositoryProvider` under `#mainDB`. **Register subsystems directly** (or `requireInstallationOf:`); this layer never boots through a `SystemInstallation`.
+
+```smalltalk
+Class { #name : 'PortfolioSystemUserStoryTest', #superclass : 'SystemBasedUserStoryTest',
+        #category : 'Portfolio-Model-Tests', #package : 'Portfolio-Model-Tests' }
+
+{ #category : 'private - running' }
+PortfolioSystemUserStoryTest >> setUpRequirements [
+
+    | repositorySystem |
+    repositorySystem := RepositoryProviderSystem new.
+    repositorySystem register: InMemoryRepositoryProvider new as: #mainDB.
+    self registerSubsystem: repositorySystem; registerSubsystem: PortfolioSystem new
+]
+
+{ #category : 'tests - start managing' }
+PortfolioSystemUserStoryTest >> testStartManagingPortfolio [
+
+    | identified |
+    identified := self systemUnderTest startManagingPortfolio:
+        ( Portfolio named: 'Long-term' describedAs: 'Buy and hold' withImage: 'http://x' ownedBy: 'user-1' ).
+    self
+        assert: self systemUnderTest portfolios size equals: 1;
+        assert: self systemUnderTest portfolios anyOne identifier equals: identified identifier
+]
+
+{ #category : 'tests - querying' }
+PortfolioSystemUserStoryTest >> testPortfolioIdentifiedByRaisesWhenNotFound [
+
+    | uuid |
+    uuid := UUID new.
+    self
+        should: [ self systemUnderTest portfolioIdentifiedBy: uuid ]
+        raise: ObjectNotFound
+        withMessageText: ( 'There''s no portfolio identified by <1s>' expandMacrosWith: uuid asString )
+]
+```
+
+Conventions: one scenario per system selector, categories `tests - <verb>` (`tests - start managing`, `tests - querying`, `tests - updates`, `tests - lifecycle`); assert the not-found / conflict / invalid-state paths with `should:raise:withMessageText:`; no localization helpers. For a time-versioned aggregate (§1), test the retroactive-fix-up and no-op-short-circuit cases here.
+
+> **One thing these tests cannot catch.** Both layers wire the `CompositeSystem`/subsystems **by hand**, so they never exercise Kepler's module-registration reflection (§4) or the production install path. A mis-spelled `register…SystemForInstallationIn:` selector ships green here and only fails at real boot. Keep one PostgreSQL integration test that boots through the real `SystemInstallation install:` (see `abbaco-api-persistence`).
+
+## 6. Common mistakes
 
 - **Putting `sequentialNumber` or `uuid` on the value object** — identity belongs to the `Identified<Thing>` wrapper. Sagan needs `sequentialNumber` for the auto-increment PK; the value object should be reusable across stored and unstored contexts.
 - **Exposing `new` directly** instead of a `named:…ownedBy:` factory — preconditions never fire and invalid state slips into Sagan.

@@ -4,7 +4,7 @@ This is the team's durable home for the Smalltalk conventions, process guidance,
 
 ## Purpose of this workspace
 
-- `.agent/skills/` — the playbook. Mandatory conventions, the Smalltalk creation process, the TDD discipline, and the five-part Abbaco API family (`abbaco-api-house-style` + `abbaco-api-domain-model` + `abbaco-api-persistence` + `abbaco-api-rest-controller` + `abbaco-api-testing`).
+- `.agent/skills/` — the playbook. Mandatory conventions, the Smalltalk creation process, the TDD discipline, and the five-part Abbaco API family (`abbaco-api-house-style` + `abbaco-api-domain-model` + `abbaco-api-persistence` + `abbaco-api-rest` + `abbaco-api-integration-tests`). Each in-image test layer lives with the code it tests (in the model/persistence/REST skills); `abbaco-api-integration-tests` owns the out-of-image layer (baseline load, GitHub Actions CI, Newman, docker-compose).
 - `.agent/reference/ba-libraries/` — library API surface for the ba-st open-source dependencies the Abbaco APIs consume. Not skills; just documentation a session reads on demand.
 - Project-level artefacts (specifications, implementation plans, the Pharo image) live at the workspace root or in dedicated subdirectories per project.
 
@@ -41,11 +41,11 @@ Every code-creating session follows the same opening sequence:
 
 | Skill | When to load |
 |---|---|
-| `abbaco-api-house-style` | First — the seven cross-cutting invariants and the deliberate anti-patterns. |
-| `abbaco-api-domain-model` | Designing the value object, `Identified<Thing>` wrapper, ManagementSystem, ManagementModule. Includes the time-versioned-history pattern. |
-| `abbaco-api-persistence` | Designing the Sagan-RDBMS mapping configuration, repository setup, schema lifecycle, SQL migrations. |
-| `abbaco-api-rest-controller` | Designing the REST layer — Stargate controller, routes, NeoJSON encoding, ETags, JWT, hypermedia. |
-| `abbaco-api-testing` | Writing any of the six test layers (unit, user-story, controller, API user-story, Postgres integration, Newman) or wiring CI. |
+| `abbaco-api-house-style` | First — the seven cross-cutting invariants, the deliberate anti-patterns, and the application/installation/baseline wiring on the Mercap Persistent-API-Skeleton. |
+| `abbaco-api-domain-model` | Designing the value object, `Identified<Thing>` wrapper, system, module — plus the domain unit tests and user-story tests. Includes the time-versioned-history pattern and the Kepler module-registration selector rule. |
+| `abbaco-api-persistence` | Designing the Sagan-RDBMS mapping configuration, repository setup, schema lifecycle, SQL migrations — plus the PostgreSQL integration tests (and the `update:executing:` RDBMS copy gotcha). |
+| `abbaco-api-rest` | Designing the REST layer — Stargate controller, routes, NeoJSON encoding, ETags, JWT, hypermedia — plus the full-stack controller tests and real-HTTP API user-story tests. |
+| `abbaco-api-integration-tests` | The out-of-image layer: the `BaselineOf<Name>API` load, GitHub Actions CI, Newman/Postman `api-tests/`, the docker-compose deploy chain, and the Dockerfile. |
 
 Skills are read on demand — load only what the current task needs. Cross-references from one skill to another are deliberate; follow them when prompted.
 
