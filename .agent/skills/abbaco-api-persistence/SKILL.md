@@ -332,7 +332,6 @@ synchronizePortfolio: aPortfolio with: updated
 ```
 
 Assuming the passed object now reflects the change passes every in-memory test and serves a **stale** representation against Postgres. **A mapping round-trip test that re-fetches by identifier will not catch it** — it reads the (correct) DB row, never the stale in-hand object. The test that catches it asserts on what the update path *returns or encodes* — e.g. a controller HTTP round-trip against Postgres (see §10.2).
-
 ### Query criteria — in-memory vs RDBMS portability (write the RDBMS-safe form from the start)
 
 This is the single most common way working code passes in-memory tests and then explodes against
