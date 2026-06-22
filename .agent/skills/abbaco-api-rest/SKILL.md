@@ -1,14 +1,13 @@
 ---
-name: abbaco-api-rest-controller
-description: Use when designing or code-reviewing the `<Thing>-API-Model` package of an Abbaco API — `SingleResourceRESTfulController` subclass with reflective `declare<Verb><Thing>Route` methods auto-collected by `ResourceRESTfulController>>routes`, a single `RESTfulRequestHandlerBuilder` that wires location/identifier extraction, hypermedia (`beHypermediaDriven` or `beHypermediaDrivenBy:`), pagination (`paginateCollectionsWithDefaultLimit:`), NeoJSON encoding/decoding (`decodeToNeoJSONObjectWhenAccepting:`, `whenResponding:encodeToJsonApplying:`), entity tags (`createEntityTagHashing:`), caching (`directCachingWith:`), vendor-versioned media types (`application/vnd.mercap.<resource>+json;version=X.Y.Z`), and a `StargateApplication` subclass for bootstrap (note `projectName` replaced `applicationBaselineName` in v9). JWT bearer auth is the default; an optional Auth0 section covers role assignment and the `Auth0UserManagementAPIClient` pattern.
+name: abbaco-api-rest
+description: Use when designing or code-reviewing the `<Thing>-API-Model` package of an Abbaco API — `SingleResourceRESTfulController` subclass with reflective `declare<Verb><Thing>Route` methods auto-collected by `ResourceRESTfulController>>routes`, a single `RESTfulRequestHandlerBuilder` that wires location/identifier extraction, hypermedia (`beHypermediaDriven` or `beHypermediaDrivenBy:`), pagination (`paginateCollectionsWithDefaultLimit:`), NeoJSON encoding/decoding (`decodeToNeoJSONObjectWhenAccepting:`, `whenResponding:encodeToJsonApplying:`), entity tags (`createEntityTagHashing:`), caching (`directCachingWith:`), vendor-versioned media types (`application/vnd.mercap.<resource>+json;version=X.Y.Z`). Also covers the controller's full-stack tests (`SingleResourceRESTfulControllerTest`) and real-HTTP API user-story tests (`HTTPBasedRESTfulAPITest`). JWT bearer auth is the default; an optional Auth0 section covers role assignment and the `Auth0UserManagementAPIClient` pattern. The application/installation/baseline bootstrap lives in `abbaco-api-house-style`.
 ---
 
-# Abbaco API — REST Controller Layer
+# Abbaco API — REST Layer
 
-The `<Thing>-API-Model` package contains exactly two production classes:
+The `<Thing>-API-Model` package's production class is the **`<Thing>RESTfulController`** — a subclass of Stargate's `SingleResourceRESTfulController`, one instance per resource type, wiring routes to the `<Thing>System` through Kepler.
 
-1. **`<Thing>RESTfulController`** — subclass of Stargate's `SingleResourceRESTfulController`. One instance per resource type, wires routes to the management system through Kepler.
-2. **`<Thing>APIApplication`** — subclass of `StargateApplication`. Declares the CLI command name, configuration parameters (Stargate, Sagan/PostgreSQL, optionally Auth0), the `controllersToInstall`, and bootstraps the Kepler `CompositeSystem`.
+The runnable **application** that hosts it (`<Thing>APIApplication`, a `PersistentAPIApplication` subclass), the **`<Thing>SystemInstallation`**, the **`<Thing>EmptyRDBMSApplication`** bootstrap, and the **baseline** are all covered in `abbaco-api-house-style` (Application, installation, and baseline wiring) — they're thin glue on top of the Mercap Persistent-API-Skeleton and deliberately not repeated here. This skill is the controller and its tests.
 
 ## 1. The controller
 
@@ -132,7 +131,7 @@ Standard CRUD route table:
 
 **Reads are unauthenticated; writes require the `authenticationFilter`**. To add an authenticated route, wrap the `RouteSpecification` and send `authenticatedBy: authenticationFilter` (see the `Create` / `Update` / `Delete` examples above).
 
-> The generated `route urlTemplate` carries a **leading slash** — `/portfolios`, `/portfolios/<identifier:IsUUID>`. Assert exactly that form in `testRoutes` (see `abbaco-api-testing` §3).
+> The generated `route urlTemplate` carries a **leading slash** — `/portfolios`, `/portfolios/<identifier:IsUUID>`. Assert exactly that form in `testRoutes` (see §7.1).
 
 ### Action endpoints (activate / deactivate / cancel / …)
 
@@ -401,172 +400,7 @@ PaidSubscriptionRESTfulController >> cancelPaidSubscriptionBasedOn: httpRequest 
 
 The idempotency guard (`isCancelled ifFalse:`) belongs on the **controller's delegation boundary**, not in the management system — the management system can refuse a redundant transition (raising `ObjectNotFound` or similar), and the controller suppresses that for HTTP idempotency.
 
-## 6. `StargateApplication` subclass
-
-```smalltalk
-Class {
-    #name : 'PortfolioAPIApplication',
-    #superclass : 'StargateApplication',
-    #instVars : [ 'rootSystem' ],
-    #category : 'Portfolio-API-Model',
-    #package : 'Portfolio-API-Model'
-}
-
-{ #category : 'accessing' }
-PortfolioAPIApplication class >> commandName [ ^ 'portfolio-api' ]
-
-{ #category : 'accessing' }
-PortfolioAPIApplication class >> description [
-    ^ 'I provide a RESTful API over HTTP to manage Abbaco-owned portfolios'
-]
-
-{ #category : 'private' }
-PortfolioAPIApplication class >> projectName [ ^ 'Portfolio-API' ]
-
-{ #category : 'accessing' }
-PortfolioAPIApplication class >> initialize [
-
-    <ignoreForCoverage>
-    self initializeVersion
-]
-
-{ #category : 'accessing' }
-PortfolioAPIApplication class >> configurationParameters [
-
-    ^ super configurationParameters ,
-        self saganConfigurationParameters ,
-        { self authenticationSecretParameter }
-]
-
-{ #category : 'private - configuration' }
-PortfolioAPIApplication class >> saganConfigurationParameters [
-
-    ^ {
-        ( MandatoryConfigurationParameter
-            named: 'PG Hostname'
-            describedBy: 'PostgreSQL host'
-            inside: #( 'Sagan' ) ).
-        ( MandatoryConfigurationParameter
-            named: 'PG Port'
-            describedBy: 'PostgreSQL port'
-            inside: #( 'Sagan' )
-            convertingWith: #asNumber ).
-        ( MandatoryConfigurationParameter
-            named: 'PG Username'
-            describedBy: 'PostgreSQL username'
-            inside: #( 'Sagan' ) ).
-        ( MandatoryConfigurationParameter
-            named: 'PG Password'
-            describedBy: 'PostgreSQL password'
-            inside: #( 'Sagan' ) ) asSensitive.
-        ( MandatoryConfigurationParameter
-            named: 'PG Database Name'
-            describedBy: 'PostgreSQL database name'
-            inside: #( 'Sagan' ) ).
-        ( OptionalConfigurationParameter
-            named: 'Create Empty Database'
-            describedBy: 'When true, recreate the schema on startup. Development / fresh deploys only.'
-            inside: #( 'Sagan' )
-            defaultingTo: false
-            convertingWith: #asBoolean ) }
-]
-
-{ #category : 'private - configuration' }
-PortfolioAPIApplication class >> authenticationSecretParameter [
-
-    ^ ( MandatoryConfigurationParameter
-        named: 'Authentication Secret'
-        describedBy: 'JSON Web Token client secret (HS256)'
-        inside: #( 'Authentication' ) ) asSensitive
-]
-
-{ #category : 'private - activation/deactivation' }
-PortfolioAPIApplication >> basicStartWithin: context [
-
-    self installRootSystem.
-    super basicStartWithin: context
-]
-
-{ #category : 'private - activation/deactivation' }
-PortfolioAPIApplication >> installRootSystem [
-
-    rootSystem := CompositeSystem new.
-
-    RDBMSRepositoryProviderModule
-        toInstallOn: rootSystem
-        connectingWith: self saganLogin
-        configuredBy: [ :options |
-            options at: #maxIdleSessionsCount put: 10.
-            options at: #minIdleSessionsCount put: 5.
-            options at: #maxActiveSessionsCount put: 12 ].
-
-    PortfolioManagementModule toInstallOn: rootSystem.
-
-    rootSystem startUp.
-    self saganShouldCreateEmptyDatabase ifTrue: [
-        ( rootSystem >> #RepositoryProviderSystem ) prepareForInitialPersistence ]
-]
-
-{ #category : 'private - configuration' }
-PortfolioAPIApplication >> saganLogin [
-
-    ^ Login new
-        database: PostgreSQLPlatform new;
-        username: self configuration sagan pgUsername;
-        password: self configuration sagan pgPassword;
-        host: self configuration sagan pgHostname;
-        port: self configuration sagan pgPort;
-        databaseName: self configuration sagan pgDatabaseName;
-        setSSL;
-        yourself
-]
-
-{ #category : 'private - configuration' }
-PortfolioAPIApplication >> saganShouldCreateEmptyDatabase [
-
-    ^ self configuration sagan createEmptyDatabase
-]
-
-{ #category : 'private - accessing' }
-PortfolioAPIApplication >> authenticationFilter [
-
-    ^ JWTBearerAuthenticationFilter
-        with: self configuration authentication authenticationSecret
-        forAlgorithmNamed: 'HS256'
-]
-
-{ #category : 'private - accessing' }
-PortfolioAPIApplication >> controllersToInstall [
-
-    ^ { PortfolioRESTfulController
-        workingWith: rootSystem
-        authenticatedBy: self authenticationFilter }
-]
-
-{ #category : 'private - activation/deactivation' }
-PortfolioAPIApplication >> basicStop [
-
-    rootSystem ifNotNil: [
-        rootSystem shutDown.
-        rootSystem := nil ].
-    super basicStop
-]
-```
-
-### House rules for the application class
-
-- **`projectName`** is the Pharo baseline name minus `BaselineOf` (e.g. `'Portfolio-API'` → `BaselineOfPortfolioAPI`). It replaces the v8 `applicationBaselineName` selector (see Stargate's migration guide on the project's GitHub). Stargate uses it to resolve the version on startup.
-- **`commandName`** is the Launchpad CLI command. It also drives container image names, log paths, and Postman `BASE_URL` defaults.
-- **`configurationParameters`** always extends `super configurationParameters` (which contributes the standard Stargate parameters: `Public URL`, `Port`, `Operations Secret`, `Log HTTP Requests`, `Concurrent Connections Threshold`). Append:
-  1. **Sagan/PostgreSQL parameters** — hostname, port, username, password (`asSensitive`), database name, optional `Create Empty Database` flag.
-  2. **Authentication secret** — `asSensitive`.
-  3. (Optional) **Auth0 parameters** — see Section 7.
-- **`installRootSystem`** runs before `super basicStartWithin:` so the controllers can be wired with a live `rootSystem`. Build a `CompositeSystem`, install the persistence module first (everything else depends on it), then every `<Thing>ManagementModule`. Call `rootSystem startUp`. Conditionally call `prepareForInitialPersistence`.
-- **Authentication** is JWT HS256 by default — `JWTBearerAuthenticationFilter with: secret forAlgorithmNamed: 'HS256'`. Reads are unauthenticated; writes go through the filter via `RouteSpecification authenticatedBy:` (Section 2).
-- **`controllersToInstall`** returns the list of controller instances. Stargate wires them into the Teapot server during `installAndStartAPI`.
-- The operational plugins (`/health`, `/metrics`, `/application-info`, `/application-configuration`, `/application-control`, `/loggers`) come for free from `StargateApplication`; do not re-register them.
-
-## 7. Optional — Auth0 integration
+## 6. Optional — Auth0 integration
 
 Some abbaco APIs (notably the subscription API) use Auth0 instead of (or in addition to) a static JWT secret. The pattern uses a small client class plus a "role assigner" collaborator.
 
@@ -619,19 +453,120 @@ Auth0 JWT validation can still flow through `JWTBearerAuthenticationFilter` if A
 
 **Do not adopt Auth0 by default for new APIs.** Most abbaco services authenticate with a shared HS256 secret. Auth0 is an option for services that need user-management features (assigning roles based on subscription state, looking up email/profile, etc.).
 
-## 8. Migration notes when porting from older code
+## 7. Testing the controller (`<Thing>-API-Model-Tests`)
 
-Older abbaco services use the `PersistentAPISkeleton` wrapper. When porting an old controller to the latest Stargate:
+Two layers live with the controller: full-stack controller tests (no network) and real-HTTP API user-story tests. (Domain unit/user-story tests live in `abbaco-api-domain-model`; the PostgreSQL integration tests — including the full-stack round-trip through the real install path — in `abbaco-api-persistence` §10; the Newman/CI layer in `abbaco-api-integration-tests`. Shared SUnit conventions are in `smalltalk-conventions`.)
 
-- Replace `PersistentAPIApplication` with `StargateApplication`.
-- Replace `applicationBaselineName` with `projectName` (Stargate v9 — see migration guide).
-- Replace `SinglePostgreSQLDatabaseProviderModuleFactory` with a hand-rolled `RDBMSRepositoryProviderModule` (see `abbaco-api-persistence`) plus an explicit `Login` builder.
-- Replace any `repository configureMappingsIn: aConfig` with `aConfig new cull: repository`.
-- Routes already declared as `RouteSpecification` work as-is, so long as their selectors match `declare<…>Route`.
-- Inline JSON encoding (`writer for: <ClassSymbol> customDo: [ :mapping | mapping encoder: [ :resource | … ] ]`) still works in NeoJSON, but prefer `for: <Class> do: [ :mapping | mapping mapAccessor: …; mapAsHypermediaControls: … ]` for new code.
-- JSON-RPC handlers from `Stargate-JSON-RPC` are still available for resources that genuinely need RPC; do not adopt them by default.
+### 7.1 Full-stack controller tests (`<Thing>RESTfulControllerTest` extends `SingleResourceRESTfulControllerTest`)
 
-## 9. Common mistakes
+This layer exercises controller + request handler + routing + encoding/decoding **without a network**. The base (Stargate-SUnit) provides request builders — `requestToPOST:as:`, `requestToGET:accepting:`, `requestToGETResourceIdentifiedBy:accepting:[conditionalTo:]`, `requestToPATCHResourceIdentifiedBy:with:accepting:conditionalTo:`, `requestToDELETEResourceIdentifiedBy:`, `requestToGETSubresource:identifiedBy:accepting:`, `parametersWith:`, `newHttpRequestContext`, `withJsonFromContentsIn:do:`, `withJsonFromItemsIn:do:`, `assertCachingDirectivesFor:with:` — plus two subclass responsibilities: `baseUrl` and `setUpResourceController`.
+
+```smalltalk
+Class { #name : 'PortfolioRESTfulControllerTest', #superclass : 'SingleResourceRESTfulControllerTest',
+        #instVars : [ 'rootSystem' ], #category : 'Portfolio-API-Model-Tests', #package : 'Portfolio-API-Model-Tests' }
+
+PortfolioRESTfulControllerTest >> baseUrl  ^ 'http://portfolios.test' asUrl
+
+PortfolioRESTfulControllerTest >> setUp
+    "Register subsystems DIRECTLY — `<Module> toInstallOn: rootSystem` only stores the root system
+     (registration happens on `install`), so the interface never resolves. The direct form mirrors
+     the domain user-story test's setUpRequirements and always works."
+    | repositorySystem |
+    rootSystem := CompositeSystem new.
+    repositorySystem := RepositoryProviderSystem new.
+    repositorySystem register: InMemoryRepositoryProvider new as: #mainDB.
+    rootSystem register: repositorySystem; register: PortfolioSystem new.
+    rootSystem startUp.
+    super setUp   "triggers setUpResourceController"
+
+PortfolioRESTfulControllerTest >> setUpResourceController
+    resourceController := PortfolioRESTfulController workingWith: rootSystem authenticatedBy: self authenticationFilter
+
+PortfolioRESTfulControllerTest >> tearDown
+    rootSystem ifNotNil: [ rootSystem shutDown. rootSystem := nil ].
+    super tearDown
+
+PortfolioRESTfulControllerTest >> systemUnderTest  ^ rootSystem >> #PortfolioManagementSystem
+```
+
+Drive the controller's API methods directly and assert on the returned `ZnResponse`:
+
+```smalltalk
+PortfolioRESTfulControllerTest >> testRoutes
+    | summaries |
+    summaries := ( resourceController routes collect: [ :route | route httpMethod , ' ' , route urlTemplate ] )
+        asSortedCollection asArray.
+    self assert: summaries equals: #(
+        'DELETE /portfolios/<identifier:IsUUID>' 'GET /portfolios'
+        'GET /portfolios/<identifier:IsUUID>' 'PATCH /portfolios/<identifier:IsUUID>'
+        'POST /portfolios' )      "urlTemplate carries a LEADING slash"
+
+PortfolioRESTfulControllerTest >> testGetPortfolioNotFound
+    "Error paths RAISE an HTTPClientError at this layer — they do not return a response."
+    self
+        should: [ resourceController
+            getPortfolioBasedOn: ( self requestToGETResourceIdentifiedBy: UUID new asString
+                accepting: resourceController portfolioVersion1dot0dot0MediaType )
+            within: self newHttpRequestContext ]
+        raise: HTTPClientError notFound
+```
+
+Conventions and gotchas:
+- **Always `InMemoryRepositoryProvider` here** — never the RDBMS provider (state leaks across tests → order-dependent failures). The Postgres mapping has its own layer (`abbaco-api-persistence` §10).
+- **`setUpResourceController`** wires the controller against the test's `rootSystem` with `self authenticationFilter` (a no-op or a test-secret `JWTBearerAuthenticationFilter`). Add `newWriteHttpRequestContext` locally (adds `resourceController requiredPermissionForWriting`) for authenticated-write success paths.
+- **Error paths RAISE** `HTTPClientError` (`notFound` / `conflict` / `unprocessableEntity` / `badRequest` / `forbidden`) — assert with `should: […] raise: HTTPClientError <kind>`, not `response isNotFound`. Only success paths return a `ZnResponse`. Auth *failures* (401/403) do **not** belong here — they're 401/403 HTTP responses in the API user-story layer (§7.3).
+- **`Cache-Control` is an `Array`** of directives (Zinc multi-value header), not a string: `( response headers at: 'Cache-Control' ) anySatisfy: [ :d | d includesSubstring: '3600' ]`. `max-age` appears only if the controller used `beAvailableFor:`/`beStaleAfter:` — `expireIn:` sets `Expires`, not `max-age`.
+- **ETag conditional GET**: use the inherited `requestToGETResourceIdentifiedBy:accepting:conditionalTo:`; there is no `setIfNoneMatch:` on `ZnRequest`. Read the ETag from `response headers at: 'ETag'`. Read JSON links via `( json at: 'links' ) at: '<rel>'`.
+- Categories: `tests - routes`, `tests - creation`, `tests - querying`, `tests - updates`, `tests - deletion`, `tests - lifecycle`, `tests - content negotiation`.
+
+**What every controller test must cover:** `testRoutes` (sorted route specs); empty collection; single lookup happy + not-found; create round-trip (content type, `Location`, body shape); update happy + idempotent same-value; delete → 204 and gone; conflict → 409; missing required field → 400; wrong JSON type → 422; over-long/empty string → 422 with the exact precondition message; ETag conditional GET → 304; Cache-Control includes the configured `max-age`; `links.self` on every encoded resource.
+
+### 7.2 Action endpoints and sub-resources (custom request builders)
+
+`SingleResourceRESTfulControllerTest` ships no `requestToPOSTAction:…` or query-string sub-resource builder — define them in `private - support`:
+
+```smalltalk
+requestToPOSTAction: actionUrl identifiedBy: anIdentifier
+    ^ TeaRequest fromZnRequest: ( ZnRequest post: actionUrl ) pathParams: ( self parametersWith: anIdentifier )
+
+requestToGETMetricsIdentifiedBy: anIdentifier asOf: anIsoDateOrNil
+    | url |
+    url := self baseUrl asString , '/things/' , anIdentifier , '/metrics'.
+    anIsoDateOrNil ifNotNil: [ :asOf | url := url , '?asOf=' , asOf ].
+    ^ TeaRequest fromZnRequest: ( ZnRequest get: url asUrl ) pathParams: ( self parametersWith: anIdentifier )
+```
+
+Action endpoints return `204` and are idempotent — write **one** round-trip test that POSTs the action URL twice (`isNoContent` both times) and asserts the observable state changed. **Pull the action URL from the previous GET response's `links.<action>`** (HATEOAS), never a synthesized `'/cancel'` string — that's what exercises the encoder's hypermedia output.
+
+### 7.3 API user-story tests — real HTTP (`HTTPBasedRESTfulAPITest`)
+
+This layer starts a real `HTTPBasedRESTfulAPI` on a free port and sends real `ZnClient` requests — the only place to assert numeric status codes, content negotiation, and JWT authorization end-to-end. Subclass Stargate-SUnit's `HTTPBasedRESTfulAPITest` (it owns `freeListeningTCPPort`, the `configuredBy:installing:` boot, `setUp`/`tearDown`, **and `newClient`**); supply `controllersToInstall` and build the `CompositeSystem` in `setUp`.
+
+**Use the parent's `newClient` and catch the HTTP error — don't invent a permissive client.** `newClient` returns `ZnClient new beOneShot; enforceHttpSuccess: true`, so any non-2xx response signals **`ZnHttpUnsuccessful`** (the default `ifFailBlock` `pass`es it up) carrying the response — `error response code` gives the exact status. Drive success paths with `self newClient … ; get/post; response`; assert error paths through a helper that fails loudly if the request unexpectedly succeeds:
+
+```smalltalk
+should: anHttpRequestBlock failWithStatus: aStatusCode
+    anHttpRequestBlock
+        on: ZnHttpUnsuccessful
+        do: [ :error | ^ self assert: error response code equals: aStatusCode ].
+    self assert: false description: 'Expected the request to be rejected, but it succeeded'
+```
+
+This mirrors §7.1's `should: […] raise: HTTPClientError <kind>`, at the real-HTTP boundary. A bare `should: […] raise: ZnHttpUnsuccessful` can't tell 406 from 415 — assert `error response code`.
+
+Content-negotiation and authorization scenarios:
+
+| Scenario | Assert |
+|---|---|
+| Unsupported `Accept` | 406. **Gotcha:** `application/json` is *not* a useful negative — Stargate leniently matches the `+json` structured-suffix, so it returns 200. Use a foreign type (`text/plain`) or wrong vendor version (`…+json;version=2.0.0`). |
+| Unsupported `Content-Type` on POST/PATCH | 415 (e.g. `application/json` body against the vendor media type) |
+| Missing `Authorization` on a write | 401, `WWW-Authenticate: Bearer` |
+| Invalid signature | 401 |
+| Insufficient permissions | 403 |
+
+Build the JWT client with the base's `newJWTAuthorizedClient` / `newJWTAuthorizedClientClaiming:`; the `operationsConfiguration` (authSchema `'jwt'`, authAlgorithm `'HS256'`, authSecret) comes from the base. For the **Postgres** variant of the full round-trip (booted through the real `SystemInstallation install:`, which additionally catches module-reflection and `update:executing:` staleness bugs), see `abbaco-api-persistence` §10.2.
+
+## 8. Common mistakes
 
 - **Defining `endpoint` or `identifierTemplate` in the subclass** — both are derived from `handling:` and `typeIdConstraint`. Defining them produces duplicate construction and silently masks the UUID constraint. Delete both methods; only define `typeIdConstraint`.
 - **Omitting `typeIdConstraint`** — `SingleResourceRESTfulController#identifierTemplate` calls `subclassResponsibility`. Without `typeIdConstraint [ ^ IsUUID ]`, the controller fails to load.
@@ -644,7 +579,6 @@ Older abbaco services use the `PersistentAPISkeleton` wrapper. When porting an o
 - **Building JSON manually with `NeoJSONWriter on: stream`** — bypasses the request handler so content negotiation, hypermedia, and ETag wiring all break. Always go through `whenResponding:encodeToJsonApplying:`.
 - **Mis-setting `as: <symbol>` on `whenResponding:encodeToJsonApplying:as:`** — must match the key used in `writer for: <symbol> do:`.
 - **Putting the auth secret in a non-`asSensitive` parameter** — the value ends up in `/operations/configuration` and Bell logs. Always `asSensitive` for secrets, JWTs, Auth0 client secrets, and PostgreSQL passwords.
-- **Skipping `projectName`** — `StargateApplication class >> projectName` is `subclassResponsibility`; without it the version banner crashes during startup.
-- **Forgetting to call `rootSystem startUp` in `installRootSystem`** — modules are registered but never installed; `rootSystem >> #PortfolioManagementSystem` returns nothing.
-- **Calling `prepareForInitialPersistence` unconditionally** — drops production tables. Always gate it behind a config flag (`Create Empty Database` / `RDBMS_CREATE_EMPTY_DATABASE`).
 - **Reusing pepper's `assertContentLanguageIn:isEnglishBecause:` / Buoy localization helpers** — abbaco APIs are not localized today. Skip the language enforcement; client-supplied `Content-Language` is ignored.
+
+(Application-class mistakes — `projectName`, the install seam, schema bootstrap — live with the application material in `abbaco-api-house-style`.)
