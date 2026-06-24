@@ -441,15 +441,31 @@ If the resource has activate/deactivate semantics, follow pepper's two-repositor
 
 When the lifecycle is richer than active/inactive, model status on the value object (see Section 1) and use `withOneMatching:` queries that combine `user = aUser` with `statusType = Confirmed`. The repository stays single; the status is part of the query, not the storage location.
 
-### `registerInterfaces` in interactive Pharo development
+### `registerInterfaces` must run on package load — wire a package manifest
 
-**Kepler does not call `registerInterfaces` automatically** outside the baseline's `postLoadDoIt:`. When you implement a new management system class interactively, call it manually before running any user-story test that references the new interface:
+**Kepler does not call `registerInterfaces` automatically.** Each system's class-side `registerInterfaces` (Section 3) declares the interface symbol, but *something* must invoke it when the package loads — otherwise a **fresh image never registers the interface**, and the first dependency resolution against it fails.
+
+The house convention (per `abbaco-subscription-api`) is a **package manifest** whose class-side `initialize` runs registration on load. For every model package that defines systems, add a `Manifest<PackageName>` class (subclass of `PackageManifest`) that registers each system's interface:
+
+```smalltalk
+"In package 'YieldCurves-Model' — Pharo runs class-side initialize on load."
+ManifestYieldCurvesModel class >> initialize
+    <ignoreForCoverage>
+    TradableSecurityMetricCapturesSystem registerInterfaces.
+    YieldCurvesSystem registerInterfaces
+```
+
+(`abbaco-subscription-api`'s `ManifestSubscriptionAPI` inlines `Kepler registerInterfaceAt:named:declaring:` instead of calling the system's `registerInterfaces` — either works; calling the existing `registerInterfaces` keeps the declaration in one place.)
+
+> **The trap this avoids — passes in dev, fails on a fresh load.** During interactive development the interfaces get registered the moment you evaluate `registerInterfaces` (or run a test that does), so the dev image is green. But a **freshly loaded image** — CI, a Docker build, a local `Metacello load` — only registers what the manifest's `initialize` registers. Omit the manifest and CI fails far from the cause: `<Thing>System>>resolveDependencies` can't find the depended-on interface, that subsystem never starts, its repository/table is never created, and an RDBMS test's `tearDown` `destroyRepositories` blows up with `relation "<table>" does not exist`. Always verify the baseline in a **fresh** image (the `abbaco-api-integration-tests` build, or a throwaway `Metacello load`), never only in the warm dev image.
+
+When you implement a new system class interactively, call `registerInterfaces` manually so the current session resolves it before you run a user-story test — **and** add it to the manifest so load-time registration is permanent:
 
 ```smalltalk
 PortfolioManagementSystem registerInterfaces.
 ```
 
-Without this, `systemUnderTest >> #PortfolioManagementSystem` raises a lookup error even though the implementation class exists.
+Without registration, `systemUnderTest >> #PortfolioManagementSystem` raises a lookup error even though the implementation class exists.
 
 ## 4. `<Thing>ManagementModule` — Kepler `SystemModule`
 

@@ -3,3 +3,7 @@
 # Per-session Claude memory is intentionally per-developer, not shared with the team.
 # See CLAUDE.md — "Memory discipline" section.
 .claude/memory/
+
+# The Abbaco Yield Curve Service has its own git repository nested here.
+# It tracks github.com/Mercap/abbaco-yield-curve-service, not this workspace.
+project/
