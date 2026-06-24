@@ -33,6 +33,8 @@ api-tests/
 
 One folder per operation (`Querying`, `Creation`, `Updating`, `Deletion`, and `Authorization` once auth lands). Each request asserts at least success, the exact `Content-Type` (vendor media type + version), and `links.self`. Chain requests with `pm.collectionVariables.set(...)`; for action endpoints, pull the action URL from the previous response's `links.<action>` — never concatenate `/cancel` to a base.
 
+**Dynamic-variable trap.** A dynamic var like `{{$guid}}` is re-resolved *every* time Postman interpolates it. If a prerequest stores a value that still contains `{{$guid}}` into a collection variable and a later request interpolates that variable (e.g. into a filter URL), the second interpolation produces a **different** GUID — the stored value and the sent value silently disagree (a filter quietly returns nothing). Resolve it once in the prerequest (`const uid = pm.variables.replaceIn('{{$guid}}')`) and build both the stored value and any later reuse from `uid`.
+
 ```bash
 #!/usr/bin/env bash
 set -eux

@@ -128,7 +128,7 @@ jobs:
         with: { github_token: ${{ secrets.GITHUB_TOKEN }}, fail_on_error: true, reporter: github-pr-review }
 ```
 
-No markdownlint config file is needed (default rules); keep READMEs lint-clean.
+No markdownlint config file is needed (default rules); keep READMEs lint-clean. `action-markdownlint` flags only the lines a PR changes, so a new doc must satisfy the default rules in full. When content genuinely can't satisfy a rule (e.g. a wide table row, which can't be wrapped to the line-length limit), scope a `<!-- markdownlint-disable <RULE> -->` / `<!-- markdownlint-enable <RULE> -->` pair around just that block rather than loosening the rule repo-wide.
 
 ## 2. The smalltalkCI load specs (`.smalltalkci/`)
 
