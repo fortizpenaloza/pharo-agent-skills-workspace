@@ -1,129 +1,25 @@
 ---
 name: abbaco-api-integration-tests
-description: The out-of-image testing and delivery layer of an Abbaco API — the `BaselineOf<Name>API` Metacello load that CI and Docker drive, the GitHub Actions workflow (`.github/workflows/unit-tests.yml`) that runs the in-image suites against a PostgreSQL sidecar and gates a Docker build/publish job, the Newman/Postman `api-tests/` suite driven by docker-compose, and the docker-compose deploy chain that runs the empty-RDBMS bootstrap container before the API container. Use when wiring CI, the Postman suite, the Dockerfile, or the baseline. The in-image Smalltalk test layers live with their code — see `abbaco-api-domain-model`, `abbaco-api-persistence`, `abbaco-api-rest`.
+description: Real-container end-to-end (Newman/Postman) testing for an Abbaco API and the containerized delivery it runs on — the `api-tests/` Newman suite driven by docker-compose, the docker-compose deploy chain that runs the empty-RDBMS bootstrap container before the API container, the Dockerfile (commandName dispatch), and `migrations/`. Use when wiring the Postman suite, docker-compose, or the Dockerfile. The automated GitHub Actions CI that loads and runs the in-image suites is a separate skill — see `abbaco-ci`. The in-image Smalltalk test layers live with their code — see `abbaco-api-domain-model`, `abbaco-api-persistence`, `abbaco-api-rest`.
 ---
 
-# Abbaco API — Integration & Delivery (out of the image)
+# Abbaco API — End-to-End Testing & Delivery (out of the image)
 
-The five in-image test layers (unit, domain user-story, controller, API user-story, PostgreSQL integration) live **with the code they test** — see `abbaco-api-domain-model`, `abbaco-api-persistence`, and `abbaco-api-rest`. This skill is everything **outside** the image: how the project loads (the baseline), how CI runs it, how the real container stack is exercised (Newman), and how it deploys (docker-compose + Dockerfile).
+The out-of-image work splits into two skills; **this is not the CI skill**:
 
-## 1. The baseline is the load entry point
+- **How every push is loaded and tested (GitHub Actions, smalltalkCI, the Tonel load layout, Pharo-version match, the fresh-image failure playbook) → `abbaco-ci`.**
+- **This skill — how the *real container stack* is exercised end-to-end (Newman/Postman) and how the service is packaged and deployed (docker-compose, Dockerfile, `migrations/`).**
 
-`BaselineOf<Name>API` (a `BaselineOf` subclass) is what CI, Docker, and a fresh image all run to materialise the project. Its structure — pinning the **Mercap Persistent-API-Skeleton** (`github://mercap/Persistent-API-Skeleton:vN`) and declaring the `YieldCurves-*`-style packages + groups — is specified in `abbaco-api-house-style` (Application, installation, and baseline wiring). Two operational facts matter here:
+The five in-image Smalltalk test layers (unit, domain user-story, controller, API user-story, PostgreSQL integration) live **with the code they test** — see `abbaco-api-domain-model`, `abbaco-api-persistence`, `abbaco-api-rest`.
 
-- **On-disk layout (standard ba-st Tonel):** the repo root holds a `.project` file — `{ #format : #tonel, #srcDirectory : 'source' }` — and **every package, the `BaselineOf<Name>API` included, lives under `source/`**. Metacello resolves `github://…/<repo>:<ref>/source`, so it only finds packages inside the configured `srcDirectory`; a baseline placed at the repo root cannot be loaded. The root otherwise carries `README.md`, `.github/`, `docker/`, `api-tests/`, and `migrations/`.
+## 1. The baseline & groups (what the container loads)
 
-- **Groups:** the `Deployment` group is the runnable applications (the API app + the empty-RDBMS bootstrap); `Tests` / `CI` are the test packages. Docker loads `Deployment` and dispatches on `commandName`; CI loads the test groups.
-- **Verifying a baseline in the dev image:** `Metacello new baseline: '<Name>API'; onConflict: [ :e | e useLoaded ]; onUpgrade: [ :e | e useLoaded ]; record: 'default'` resolves the spec (dependency repos, group membership, the package DAG) **without** loading — inspect the resolved `MetacelloVersionSpec` to confirm the skeleton pins `vN` and the packages carry the right `requires:`. A full `load` in the dev image fails with `NotFound: <Thing>-Model` because the project's own packages live only in memory there (no Tonel repository); that resolves in CI, where they load from the project's git repo. The dependency half (skeleton + SUnit extensions) resolves offline against what's already in the image.
+`BaselineOf<Name>API` is the Metacello entry point; its structure (skeleton pin, packages, groups) is specified in `abbaco-api-house-style`, and how CI loads it from disk (the Tonel `.project` + `source/.properties` layout) is in `abbaco-ci`. What matters for **delivery** is the groups:
 
-## 2. CI — GitHub Actions (`.github/workflows/unit-tests.yml`)
+- **`Deployment`** — the runnable applications (the API app + the empty-RDBMS bootstrap). The Docker image loads `Deployment` and dispatches on `commandName` (§3).
+- **`Tests` / `CI`** — the test packages; loaded by CI (`abbaco-ci`), not by the deployed image.
 
-CI is **GitHub Actions**, not Jenkins. One job loads the baseline via Smalltalk CI against a PostgreSQL sidecar and runs every in-image group (the PostgreSQL integration tests connect to `localhost:5432` via the mapped host port). A second job builds and publishes the Docker image, gated on `release-candidate`, tags, or explicit dispatch.
-
-```yaml
-name: Unit Tests
-
-on:
-  push:
-    branches: [ release-candidate ]
-    tags: [ '**' ]
-  pull_request:
-  workflow_dispatch:
-    inputs:
-      push_image:
-        description: Whether to build and push the Docker image if tests pass
-        required: true
-        default: false
-        type: boolean
-
-permissions:
-  contents: read
-
-env:
-  POSTGRES_PASSWORD: secret
-  POSTGRES_USER: postgres
-  POSTGRES_DB: test
-
-jobs:
-  unit-tests:
-    runs-on: ubuntu-latest
-    name: Unit tests on Pharo64-11
-    steps:
-      - uses: actions/checkout@v6
-      - name: Start PostgreSQL
-        run: |
-          docker rm --force <Name>-API-postgresql || true
-          docker run --name <Name>-API-postgresql -d \
-            -p 127.0.0.1:5432:5432 \
-            -e POSTGRES_PASSWORD=${{ env.POSTGRES_PASSWORD }} \
-            -e POSTGRES_USER=${{ env.POSTGRES_USER }} \
-            -e POSTGRES_DB=${{ env.POSTGRES_DB }} \
-            postgres:14 \
-            -c ssl=on \
-            -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem \
-            -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
-      - name: Wait for PostgreSQL
-        run: |
-          until docker exec <Name>-API-postgresql pg_isready -U postgres -d test; do sleep 1; done
-      - uses: hpi-swa/setup-smalltalkCI@v1
-        with:
-          smalltalk-image: Pharo64-11
-      - name: Load image and run tests
-        run: smalltalkci -s Pharo64-11 .smalltalkci/unit-tests.ston
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        timeout-minutes: 15
-      - name: Stop PostgreSQL
-        if: always()
-        run: docker kill <Name>-API-postgresql || true; docker rm --force <Name>-API-postgresql || true
-
-  build-and-publish:
-    needs: unit-tests
-    if: |
-      github.ref == 'refs/heads/release-candidate' ||
-      github.ref_type == 'tag' ||
-      (github.event_name == 'workflow_dispatch' && inputs.push_image)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    name: Build and publish Docker image
-    steps:
-      - uses: actions/checkout@v6
-      - id: docker_metadata
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ vars.REGISTRY }}/abbaco/<thing>-api
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
-        with:
-          registry: ${{ vars.REGISTRY }}
-          username: ${{ vars.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_TOKEN }}
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./docker/Dockerfile
-          push: true
-          tags: ${{ steps.docker_metadata.outputs.tags }}
-          labels: ${{ steps.docker_metadata.outputs.labels }}
-          provenance: false
-          sbom: false
-```
-
-Notes:
-- Postgres is started with `docker run` (not `services:`) so the integration tests can toggle `prepareForInitialPersistence` / `destroyRepositories` between tests. SSL is on with self-signed certs because Sagan's `setSSL` requires it.
-- **`.smalltalkci/unit-tests.ston`** loads `BaselineOf<Name>API` and runs the `<Thing>-Model-Tests` + `<Thing>-API-Model-Tests` groups in one image load. Because the test `setUp` recreates the schema, no separate bootstrap step is needed in CI.
-- `build-and-publish` reuses the registry variables (`REGISTRY`, `REGISTRY_USERNAME`, `REGISTRY_TOKEN`).
-- Add cron-driven workflows only when the API has its own scheduled maintenance (subscription-api has `cancel-overdue-*.yml`); otherwise omit them.
-
-## 3. Newman / Postman (`api-tests/`)
+## 2. Newman / Postman (`api-tests/`)
 
 End-to-end HTTP tests against the **real container stack**, run by Newman in docker-compose:
 
@@ -162,7 +58,7 @@ docker run --rm \
 docker compose down || docker compose kill
 ```
 
-## 4. The docker-compose deploy chain (empty-RDBMS → API)
+## 3. The docker-compose deploy chain (empty-RDBMS → API)
 
 The compose file mirrors the real deploy ordering. Schema creation is a **separate container that runs to completion before the API starts** — there is no `CREATE_EMPTY_DATABASE` flag on the API service (see `abbaco-api-house-style`). The API container and the empty-RDBMS container are the **same image** dispatching on `commandName`.
 
@@ -220,12 +116,12 @@ services:
 
 Standard abbaco Pharo Dockerfile (copy from `code-reference/abbaco-subscription-api/docker/`). The image's entry point dispatches between applications on the CLI argument — `<thing>-api` vs `<thing>-empty-rdbms` — matching each application's `commandName`. `migrations/` holds per-change `step*.sh` SQL scripts for schema *changes* against an existing production DB (see `abbaco-api-persistence` §9); it is empty until the first post-bootstrap schema change, because `<Thing>EmptyRDBMSApplication` is the initial bootstrap.
 
-## 5. Common mistakes
+> The Docker image (built/published by the `abbaco-ci` `unit-tests` workflow's `build-and-publish` job) loads the baseline `Deployment` group. So the Docker build is a **fresh load** — it hits the same load-time pitfalls CI does (see `abbaco-ci`: missing `source/.properties`, unregistered system interfaces). If CI's test job is green on a fresh image, the Docker build loads too.
 
-- **Carrying over a Jenkinsfile** — CI is GitHub Actions. Delete legacy `Jenkinsfile`s when copying scaffolding from older projects.
+## 4. Common mistakes
+
 - **Putting a `CREATE_EMPTY_DATABASE` env var on the API service** — that flag is gone. Schema creation is the empty-RDBMS container, ordered before the API via `service_completed_successfully`.
-- **Adding new routes without updating `tests.json`** — Pharo CI passes, the Newman suite silently ignores the new endpoint, and a broken route ships.
+- **Adding new routes without updating `tests.json`** — the in-image suites pass, the Newman suite silently ignores the new endpoint, and a broken route ships.
 - **Synthesizing an action URL** (`base / 'cancel'`) in a Postman request instead of following `links.<action>` from the prior response — the encoder's hypermedia output is never exercised.
-- **Hard-coding `localhost` in the in-image integration test connection** — read `PG_HOSTNAME` from the environment (see `abbaco-api-persistence` §10) so the same test runs locally and against the CI sidecar.
-- **Verifying a baseline with a full `load` in the dev image and reporting the `NotFound` as a defect** — use `record:` + resolved-spec inspection there; a real load needs the project's git repo (CI) or the Tonel sources on disk.
 - **Spelling the Postman environment file `environment.json`** — existing abbaco code uses `enviroment.json` (sic); match it so `run-tests.sh --environment` resolves.
+- **The empty-RDBMS container not exiting** — if its app doesn't terminate after creating the schema, `service_completed_successfully` never fires and the API never starts. The bootstrap app must run-and-exit.
